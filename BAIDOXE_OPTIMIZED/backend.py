@@ -164,7 +164,13 @@ class ParkingBackend:
                     else:
                         card = self.store.data["cards"][uid]
                         is_in = "IN" in gate_raw
-                        if (is_in and not card["isInside"]) or (not is_in and card["isInside"]):
+                        is_admin = card.get("type") == "admin"
+                        
+                        # Thẻ ADMIN được ưu tiên: Luôn SUCCESS và phí 0đ, không kiểm tra isInside
+                        if is_admin:
+                            res = {"gate": gate, "action": "AUTH", "status": "SUCCESS", "fee": 0}
+                        # Thẻ thường: Kiểm tra đúng luồng VÀO/RA
+                        elif (is_in and not card["isInside"]) or (not is_in and card["isInside"]):
                             fee = 0
                             if not is_in:
                                 fee, _ = self.store.calculate_fee(uid, datetime.now())
