@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# Parking Data & Logs
+BAIDOXE_OPTIMIZED/logs/
+*.log
+# parking_data.json  <-- Bỏ comment nếu bạn không muốn đẩy dữ liệu bãi xe lên GitHub
+
+# Arduino / IDE
+build/
+libraries/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

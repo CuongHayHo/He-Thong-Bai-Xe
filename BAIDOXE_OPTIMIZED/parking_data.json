@@ -1,0 +1,43 @@
+{
+    "config": {
+        "hourly_rate": 1000
+    },
+    "cards": {
+        "B6 1D 43 05": {
+            "name": "Admin Card",
+            "type": "admin",
+            "isInside": false,
+            "entry_time": "2026-04-09 17:11:18",
+            "exit_time": "2026-04-09 17:12:29"
+        },
+        "32 4B FC ED": {
+            "name": "User_C ED",
+            "type": "admin",
+            "isInside": false,
+            "entry_time": "2026-04-15 18:40:02",
+            "exit_time": "2026-04-15 18:40:07"
+        },
+        "66 8D 36 06": {
+            "name": "User_6 06",
+            "type": "regular",
+            "isInside": true,
+            "entry_time": "2026-04-15 18:39:43",
+            "exit_time": "2026-04-15 18:39:39"
+        },
+        "05 A3 6C 05": {
+            "name": "User_C 05",
+            "type": "regular",
+            "isInside": true,
+            "entry_time": "2026-04-09 16:46:55",
+            "exit_time": "2026-04-09 16:45:10"
+        },
+        "FA 8E F2 05": {
+            "name": "User_2 05",
+            "type": "regular",
+            "isInside": true,
+            "entry_time": "2026-04-09 17:12:31",
+            "exit_time": "2026-04-09 17:12:20"
+        }
+    },
+    "history": []
+}
