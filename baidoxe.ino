@@ -6,9 +6,9 @@
 #include <WiFi.h>
 #include <Wire.h>
 
-const char *ssid = "HTT3";
-const char *password = "33333333";
-const char *server_ip = "192.168.69.101";
+const char *ssid = "YOUR_WIFI_SSID";         // Thay tên WiFi của bạn
+const char *password = "YOUR_WIFI_PASSWORD"; // Thay mật khẩu WiFi
+const char *server_ip = "192.168.x.x";       // Thay IP của máy tính chạy Python
 const uint16_t server_port = 5000;
 
 WiFiClient client;
@@ -138,13 +138,13 @@ bool waitVehicle(int trig, int echo, MFRC522 &mfrc, const char *gate,
     if (!detected && d < ULTRA_THRESHOLD_CM) {
       detected = true;
     } else if (detected && d >= ULTRA_THRESHOLD_CM) {
-      vTaskDelay(pdMS_TO_TICKS(100)); 
+      vTaskDelay(pdMS_TO_TICKS(100));
       passed = true;
       break;
     }
-    
+
     // --- KIỂM TRA THẺ QUÉT THÊM (BÁO BẬN) ---
-    if (xSemaphoreTake(spiMutex, 0)) { // Dùng timeout 0 để không đợi, nếu bận thì bỏ qua
+    if (xSemaphoreTake(spiMutex, 0)) {
       if (mfrc.PICC_IsNewCardPresent() && mfrc.PICC_ReadCardSerial()) {
         updateLCD(gate, "BUSY! PLS WAIT");
         mfrc.PICC_HaltA();
@@ -155,11 +155,11 @@ bool waitVehicle(int trig, int echo, MFRC522 &mfrc, const char *gate,
     vTaskDelay(pdMS_TO_TICKS(50));
   }
 
-  // Đã xóa vTaskDelay(1000) dư thừa tại đây để đóng ngay lập tức
   srv.write(SERVO_CLOSED_ANGLE);
-  vTaskDelay(pdMS_TO_TICKS(600)); // Đợi 0.6s vừa đủ để servo quay về vị trí đóng
-  srv.detach(); 
-  
+  vTaskDelay(
+      pdMS_TO_TICKS(600)); // Đợi 0.6s vừa đủ để servo quay về vị trí đóng
+  srv.detach();
+
   updateLCD("PARKING SYSTEM", "READY...");
   return passed;
 }
@@ -171,7 +171,7 @@ bool waitVehicle(int trig, int echo, MFRC522 &mfrc, const char *gate,
 void TaskSocketListener(void *pv) {
   while (1) {
     bool hasData = false;
-    
+
     // Bảo vệ việc kiểm tra Socket
     if (xSemaphoreTake(socketMutex, portMAX_DELAY)) {
       if (client.connected() && client.available()) {
@@ -200,17 +200,23 @@ void TaskSocketListener(void *pv) {
             GateMsg msg;
             msg.fee = doc.containsKey("fee") ? doc["fee"] : 0;
             msg.status = STATUS_REJECT;
-            
-            if (status == "SUCCESS") msg.status = STATUS_SUCCESS;
-            else if (status == "WRONG_WAY") msg.status = STATUS_WRONG_WAY;
-            
-            if (gate == "IN") xQueueSend(queueIn, &msg, 0);
-            else if (gate == "OUT") xQueueSend(queueOut, &msg, 0);
-            
+
+            if (status == "SUCCESS")
+              msg.status = STATUS_SUCCESS;
+            else if (status == "WRONG_WAY")
+              msg.status = STATUS_WRONG_WAY;
+
+            if (gate == "IN")
+              xQueueSend(queueIn, &msg, 0);
+            else if (gate == "OUT")
+              xQueueSend(queueOut, &msg, 0);
+
           } else if (action == "OPEN") {
             GateMsg msg = {STATUS_MANUAL_OPEN, 0};
-            if (gate == "IN") xQueueSend(queueIn, &msg, 0);
-            else if (gate == "OUT") xQueueSend(queueOut, &msg, 0);
+            if (gate == "IN")
+              xQueueSend(queueIn, &msg, 0);
+            else if (gate == "OUT")
+              xQueueSend(queueOut, &msg, 0);
           }
         }
       }
@@ -233,7 +239,8 @@ void TaskGate(void *pv) {
     GateMsg receivedMsg;
 
     // 1. Kiểm tra lệnh mở cổng (Thủ công hoặc từ Socket)
-    if (xQueueReceive(isInsideGate ? queueIn : queueOut, &receivedMsg, 0) == pdTRUE) {
+    if (xQueueReceive(isInsideGate ? queueIn : queueOut, &receivedMsg, 0) ==
+        pdTRUE) {
       if (receivedMsg.status == STATUS_MANUAL_OPEN) {
         triggerOpen = true;
         updateLCD(lcdName, "MANUAL OPENING");
@@ -259,15 +266,18 @@ void TaskGate(void *pv) {
 
     if (cardFound) {
       // 1. GỬI YÊU CẦU NGAY LẬP TỨC
-      sendJson(isInsideGate ? "GATE IN" : "GATE OUT", "CHECK", scannedUid, "Auth Req");
+      sendJson(isInsideGate ? "GATE IN" : "GATE OUT", "CHECK", scannedUid,
+               "Auth Req");
       updateLCD(lcdName, "WAITING PC...");
 
       // 2. Chờ kết quả từ Queue thay vì dùng loop polling
-      if (xQueueReceive(isInsideGate ? queueIn : queueOut, &receivedMsg, pdMS_TO_TICKS(5000)) == pdTRUE) {
+      if (xQueueReceive(isInsideGate ? queueIn : queueOut, &receivedMsg,
+                        pdMS_TO_TICKS(5000)) == pdTRUE) {
         if (receivedMsg.status == STATUS_SUCCESS) {
           triggerOpen = true;
           if (!isInsideGate) {
-            updateLCD("SUCCESS! EXIT", "FEE: " + String(receivedMsg.fee) + "VND");
+            updateLCD("SUCCESS! EXIT",
+                      "FEE: " + String(receivedMsg.fee) + "VND");
             vTaskDelay(pdMS_TO_TICKS(500));
           } else {
             updateLCD(lcdName, "SUCCESS! WELCOME");
@@ -294,9 +304,10 @@ void TaskGate(void *pv) {
     if (triggerOpen) {
       srv.attach(isInsideGate ? SERVO_IN_PIN : SERVO_OUT_PIN);
       srv.write(SERVO_OPEN_ANGLE);
-      
+
       if (waitVehicle(trig, echo, mfrc, lcdName, srv)) {
-        sendJson(isInsideGate ? "GATE IN" : "GATE OUT", "DONE", scannedUid, "Process Complete");
+        sendJson(isInsideGate ? "GATE IN" : "GATE OUT", "DONE", scannedUid,
+                 "Process Complete");
       } else {
         updateLCD(lcdName, "TIMEOUT! CLOSED");
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -310,7 +321,7 @@ void setup() {
   lcdMutex = xSemaphoreCreateMutex();
   spiMutex = xSemaphoreCreateMutex();
   socketMutex = xSemaphoreCreateMutex();
-  
+
   queueIn = xQueueCreate(5, sizeof(GateMsg));
   queueOut = xQueueCreate(5, sizeof(GateMsg));
 
@@ -325,7 +336,7 @@ void setup() {
   mfrc_out.PCD_Init();
   ESP32PWM::allocateTimer(0);
   ESP32PWM::allocateTimer(1);
-  // Không cần attach servo ở setup, chỉ attach khi cần mở cổng
+
   servo_in.write(SERVO_CLOSED_ANGLE);
   servo_out.write(SERVO_CLOSED_ANGLE);
   pinMode(TRIG_IN, OUTPUT);
@@ -333,7 +344,7 @@ void setup() {
   pinMode(TRIG_OUT, OUTPUT);
   pinMode(ECHO_OUT, INPUT);
 
-  xTaskCreatePinnedToCore(TaskSocketListener, "Socket", 4096, NULL, 3, NULL, 0); 
+  xTaskCreatePinnedToCore(TaskSocketListener, "Socket", 4096, NULL, 3, NULL, 0);
   xTaskCreatePinnedToCore(TaskGate, "IN", 4096, (void *)true, 1, NULL, 1);
   xTaskCreatePinnedToCore(TaskGate, "OUT", 4096, (void *)false, 1, NULL, 1);
 
