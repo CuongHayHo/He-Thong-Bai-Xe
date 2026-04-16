@@ -25,7 +25,8 @@ logger = logging.getLogger("Backend")
 # --- CONFIGURATION ---
 DB_FILE = 'parking_data.json'
 HOST = '0.0.0.0'
-PORT = 5000
+PORT_GATE = 5000
+PORT_SLOT = 5001
 
 class ParkingStore:
     def __init__(self):
@@ -35,30 +36,44 @@ class ParkingStore:
         threading.Thread(target=self._save_worker, daemon=True).start()
 
     def load_db(self):
+        res = {
+            "config": {"hourly_rate": 10000},
+            "cards": {},
+            "slots": {},
+            "history": []
+        }
         paths = [DB_FILE, 'parking_data.json']
         for p in paths:
             if os.path.exists(p):
                 try:
                     with open(p, 'r', encoding='utf-8') as f:
-                        return json.load(f)
+                        loaded = json.load(f)
+                        # Ensure all keys exist
+                        for k in res:
+                            if k not in loaded: loaded[k] = res[k]
+                        return loaded
                 except: pass
-        return {
-            "config": {"hourly_rate": 10000},
-            "cards": {},
-            "history": []
-        }
+        return res
 
     def _save_worker(self):
         while True:
             self.save_queue.get()
+            # Debounce: wait a bit and clear pending saves
+            time.sleep(1.0) 
+            while not self.save_queue.empty():
+                try: self.save_queue.get_nowait()
+                except: break
+                
             try:
+                with self.lock:
+                    # Deep copy data to avoid mutation during save
+                    data_to_save = json.loads(json.dumps(self.data))
+                
                 with open(DB_FILE, 'w', encoding='utf-8') as f:
-                    json.dump(self.data, f, indent=4, ensure_ascii=False)
+                    json.dump(data_to_save, f, indent=4, ensure_ascii=False)
                 logger.info("Database saved successfully.")
             except Exception as e:
                 logger.error(f"Error saving database: {e}")
-            finally:
-                self.save_queue.task_done()
 
     def request_save(self):
         self.save_queue.put(True)
@@ -81,7 +96,8 @@ class ParkingStore:
 class ParkingBackend:
     def __init__(self):
         self.store = ParkingStore()
-        self.active_clients = []
+        self.gate_clients = []
+        self.slot_clients = []
         self.callbacks = {
             "on_event": None,        # lambda uid, event, detail
             "on_refresh": None,      # lambda
@@ -103,28 +119,29 @@ class ParkingBackend:
                 logger.error(f"Callback Error ({event_name}): {e}\n{traceback.format_exc()}")
 
     def start_server(self):
-        threading.Thread(target=self._server_loop, daemon=True).start()
+        threading.Thread(target=self._server_loop, args=(PORT_GATE, "GATE"), daemon=True).start()
+        threading.Thread(target=self._server_loop, args=(PORT_SLOT, "SLOT"), daemon=True).start()
 
-    def _server_loop(self):
+    def _server_loop(self, port, mode):
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.bind((HOST, PORT))
+        server.bind((HOST, port))
         server.listen(10)
-        logger.info(f"Server listening on {HOST}:{PORT}")
+        logger.info(f"{mode} Server listening on {HOST}:{port}")
         
         while True:
             conn, addr = server.accept()
             conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            count = 0
-            with self.store.lock:
-                self.active_clients.append(conn)
-                count = len(self.active_clients)
             
-            self._trigger("on_client_change", count) # Ở ngoài lock
-            logger.info(f"New connection from {addr}")
-            threading.Thread(target=self._client_handler, args=(conn, addr), daemon=True).start()
+            client_list = self.gate_clients if mode == "GATE" else self.slot_clients
+            with self.store.lock:
+                client_list.append(conn)
+            
+            self._trigger("on_client_change", len(self.gate_clients) + len(self.slot_clients)) 
+            logger.info(f"New {mode} connection from {addr}")
+            threading.Thread(target=self._client_handler, args=(conn, addr, mode), daemon=True).start()
 
-    def _client_handler(self, conn, addr):
+    def _client_handler(self, conn, addr, mode):
         buffer = ""
         try:
             while True:
@@ -136,14 +153,13 @@ class ParkingBackend:
                     if line.strip():
                         self.handle_msg(conn, line.strip())
         except Exception as e:
-            logger.warning(f"Client {addr} disconnected or error: {e}")
+            logger.warning(f"{mode} Client {addr} disconnected: {e}")
         finally:
-            count = 0
+            client_list = self.gate_clients if mode == "GATE" else self.slot_clients
             with self.store.lock:
-                if conn in self.active_clients:
-                    self.active_clients.remove(conn)
-                    count = len(self.active_clients)
-            self._trigger("on_client_change", count) # Ở ngoài lock
+                if conn in client_list:
+                    client_list.remove(conn)
+            self._trigger("on_client_change", len(self.gate_clients) + len(self.slot_clients))
             conn.close()
 
     def handle_msg(self, conn, line):
@@ -201,12 +217,33 @@ class ParkingBackend:
                             card["exit_time"] = now.strftime("%Y-%m-%d %H:%M:%S")
                             event_data = (uid, "RA", f"Phí: {fee:,}đ")
                         
+                        # Save to history for reporting
+                        self.store.data["history"].append({
+                            "time": now.strftime("%Y-%m-%d %H:%M:%S"),
+                            "uid": uid,
+                            "event": event_data[1],
+                            "detail": event_data[2],
+                            "fee": fee if not is_in else 0
+                        })
                         self.store.request_save()
                 
                 if event_data:
                     self._trigger("on_event", *event_data)
                     self._trigger("on_refresh")
                     logger.info(f"Gate {gate} process DONE for UID {uid}")
+
+            elif action == "SLOT_UPDATE":
+                slot_id = req.get("slot", 1)
+                status = req.get("status", "VACANT")
+                with self.store.lock:
+                    if "slots" not in self.store.data:
+                        self.store.data["slots"] = {}
+                    self.store.data["slots"][str(slot_id)] = status
+                    self.store.request_save()
+                
+                self._trigger("on_refresh")
+                self._trigger("on_event", "PARKING", f"SLOT {slot_id}", status)
+                logger.info(f"Slot {slot_id} updated to {status}")
 
         except Exception as e:
             logger.error(f"Handler Error: {e}")
@@ -215,13 +252,13 @@ class ParkingBackend:
         msg = json.dumps({"gate": gate, "action": "OPEN"}) + "\n"
         dead = []
         with self.store.lock:
-            for c in self.active_clients:
+            for c in self.gate_clients: # Chỉ gửi cho ESP32
                 try:
                     c.sendall(msg.encode('utf-8'))
                 except: dead.append(c)
             for d in dead:
-                if d in self.active_clients: self.active_clients.remove(d)
-                self._trigger("on_client_change", len(self.active_clients))
+                if d in self.gate_clients: self.gate_clients.remove(d)
         
+        self._trigger("on_client_change", len(self.gate_clients))
         self._trigger("on_event", "SYSTEM", f"MANUAL OPEN {gate}", "Gửi từ phần mềm")
         logger.info(f"Manual open command sent for gate {gate}")

@@ -5,7 +5,7 @@
     "cards": {
         "B6 1D 43 05": {
             "name": "Admin Card",
-            "type": "admin",
+            "type": "regular",
             "isInside": false,
             "entry_time": "2026-04-09 17:11:18",
             "exit_time": "2026-04-09 17:12:29"
@@ -13,9 +13,9 @@
         "32 4B FC ED": {
             "name": "User_C ED",
             "type": "regular",
-            "isInside": true,
-            "entry_time": "2026-04-15 19:21:54",
-            "exit_time": "2026-04-15 19:21:51"
+            "isInside": false,
+            "entry_time": "2026-04-17 01:56:12",
+            "exit_time": "2026-04-17 01:56:16"
         },
         "05 A3 6C 05": {
             "name": "User_C 05",
@@ -34,10 +34,47 @@
         "66 8D 36 06": {
             "name": "User_6 06",
             "type": "regular",
-            "isInside": true,
-            "entry_time": "2026-04-15 19:21:41",
-            "exit_time": "2026-04-15 19:21:37"
+            "isInside": false,
+            "entry_time": "2026-04-17 01:56:05",
+            "exit_time": "2026-04-17 01:56:20"
         }
     },
-    "history": []
+    "history": [
+        {
+            "time": "2026-04-17 01:56:05",
+            "uid": "66 8D 36 06",
+            "event": "VÀO",
+            "detail": "Xe đã qua cổng",
+            "fee": 0
+        },
+        {
+            "time": "2026-04-17 01:56:12",
+            "uid": "32 4B FC ED",
+            "event": "VÀO",
+            "detail": "Xe đã qua cổng",
+            "fee": 0
+        },
+        {
+            "time": "2026-04-17 01:56:16",
+            "uid": "32 4B FC ED",
+            "event": "RA",
+            "detail": "Phí: 10,000đ",
+            "fee": 10000
+        },
+        {
+            "time": "2026-04-17 01:56:20",
+            "uid": "66 8D 36 06",
+            "event": "RA",
+            "detail": "Phí: 10,000đ",
+            "fee": 10000
+        }
+    ],
+    "slots": {
+        "1": "VACANT",
+        "2": "VACANT",
+        "3": "VACANT",
+        "4": "VACANT",
+        "5": "VACANT",
+        "6": "VACANT"
+    }
 }

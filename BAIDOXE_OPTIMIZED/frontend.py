@@ -1,5 +1,7 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import ttk, messagebox, simpledialog, filedialog
+import csv
+import threading
 from datetime import datetime, timedelta
 
 class ScrollableFrame(tk.Frame):
@@ -53,6 +55,7 @@ class ModernParkingGUI:
         
         # UI State
         self.card_rows = {} # uid -> {frame, dur_label, fee_label, type_btn}
+        self.slot_indicators = {} # slot_id -> label
         self.needs_refresh = True
         
         self.create_widgets()
@@ -63,6 +66,7 @@ class ModernParkingGUI:
         self.backend.set_callback("on_new_card", self._on_new_card)
         self.backend.set_callback("on_client_change", self._on_client_change)
         
+        self.load_history_from_db()
         self.update_ui_loop()
 
     def setup_styles(self):
@@ -86,13 +90,17 @@ class ModernParkingGUI:
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill='both', expand=True, padx=20, pady=10)
         self.tab_dashboard = tk.Frame(self.notebook, bg=self.colors["bg"])
+        self.tab_slots = tk.Frame(self.notebook, bg=self.colors["bg"])
         self.tab_history = tk.Frame(self.notebook, bg=self.colors["bg"])
         self.tab_settings = tk.Frame(self.notebook, bg=self.colors["bg"])
+        
         self.notebook.add(self.tab_dashboard, text="  DASHBOARD  ")
+        self.notebook.add(self.tab_slots, text="  CHỖ TRỐNG  ")
         self.notebook.add(self.tab_history, text="  HTR LOGS  ")
         self.notebook.add(self.tab_settings, text="  SETTINGS  ")
 
         self.setup_dashboard()
+        self.setup_slots()
         self.setup_history()
         self.setup_settings()
 
@@ -102,6 +110,9 @@ class ModernParkingGUI:
         tools.pack(fill='x', pady=10)
         tk.Button(tools, text="⚡ MỞ CỔNG IN", command=lambda: self.backend.manual_open("IN"), bg=self.colors["success"], fg="#1a1b26", font=('Segoe UI', 9, 'bold'), border=0, padx=20, pady=8).pack(side='left', padx=5)
         tk.Button(tools, text="⚡ MỞ CỔNG OUT", command=lambda: self.backend.manual_open("OUT"), bg=self.colors["accent"], fg="#ffffff", font=('Segoe UI', 9, 'bold'), border=0, padx=20, pady=8).pack(side='left', padx=5)
+        
+        self.lbl_slot_summary = tk.Label(tools, text="CHỖ TRỐNG: -", fg=self.colors["warning"], bg=self.colors["bg"], font=('Segoe UI', 10, 'bold'))
+        self.lbl_slot_summary.pack(side='right', padx=20)
         
         # Scrollable List Container
         self.list_frame = ScrollableFrame(self.tab_dashboard, bg=self.colors["bg"])
@@ -116,15 +127,31 @@ class ModernParkingGUI:
         self.list_frame.scrollable_window.columnconfigure(4, minsize=100)
         self.list_frame.scrollable_window.columnconfigure(5, minsize=300)
 
+    def setup_slots(self):
+        # Header for slots tab
+        tk.Label(self.tab_slots, text="SƠ ĐỒ VỊ TRÍ XE TRONG BÃI", fg=self.colors["accent"], bg=self.colors["bg"], font=('Segoe UI', 16, 'bold')).pack(pady=20)
+        
+        # Grid container
+        self.slot_grid = tk.Frame(self.tab_slots, bg=self.colors["bg"])
+        self.slot_grid.pack(expand=True, fill='both', padx=50, pady=20)
+
     def setup_history(self):
+        # Toolbar for history
+        htools = tk.Frame(self.tab_history, bg=self.colors["bg"])
+        htools.pack(fill='x', pady=5, padx=10)
+        
+        tk.Button(htools, text="📊 XUẤT BÁO CÁO DOANH THU (EXCEL/CSV)", command=self.export_revenue, 
+                  bg=self.colors["accent"], fg="#ffffff", font=('Segoe UI', 9, 'bold'), border=0, padx=20, pady=8).pack(side='left')
+
         self.log_txt = tk.Text(self.tab_history, height=12, bg="#16161e", fg=self.colors["success"], font=('Consolas', 10), borderwidth=0)
         self.log_txt.pack(fill='x', pady=10, padx=10)
         
-        cols = ("Thời Gian", "UID", "Sự Kiện", "Chi Tiết")
+        cols = ("Thời Gian", "UID", "Sự Kiện", "Chi Tiết", "Phí")
         self.htree = ttk.Treeview(self.tab_history, columns=cols, show='headings', height=10)
         for col in cols:
             self.htree.heading(col, text=col)
-            self.htree.column(col, anchor='center')
+            self.htree.column(col, anchor='center', width=100)
+        self.htree.column("Chi Tiết", width=200) # Cho cột chi tiết rộng hơn
         self.htree.pack(fill='both', expand=True, padx=10, pady=5)
 
     def setup_settings(self):
@@ -168,7 +195,43 @@ class ModernParkingGUI:
         # Clear existing
         for child in self.list_frame.scrollable_window.winfo_children():
             child.destroy()
+        for child in self.slot_grid.winfo_children():
+            child.destroy()
+            
         self.card_rows.clear()
+        self.slot_indicators.clear()
+
+        # 0. Vẽ Cổng đỗ xe (Parking Slots Grid)
+        with self.backend.store.lock:
+            slots = self.backend.store.data.get("slots", {})
+            if not slots:
+                tk.Label(self.slot_grid, text="CHƯA CÓ THÔNG TIN VỊ TRÍ XE", fg=self.colors["text_dim"], bg=self.colors["bg"], font=('Segoe UI', 12)).pack(expand=True)
+            else:
+                # Vẽ grid các chỗ đỗ
+                row, col = 0, 0
+                max_cols = 4
+                for sid in sorted(slots.keys()):
+                    status = slots[sid]
+                    color = self.colors["danger"] if status == "OCCUPIED" else self.colors["success"]
+                    st_text = "CÓ XE" if status == "OCCUPIED" else "TRỐNG"
+                    
+                    slot_box = tk.Frame(self.slot_grid, bg=self.colors["surface"], highlightthickness=2, highlightbackground=color, width=150, height=180)
+                    slot_box.grid(row=row, column=col, padx=20, pady=20)
+                    slot_box.pack_propagate(False)
+                    
+                    tk.Label(slot_box, text=f"VỊ TRÍ {sid}", fg=self.colors["text_dim"], bg=self.colors["surface"], font=('Segoe UI', 9, 'bold')).pack(pady=10)
+                    tk.Label(slot_box, text=st_text, fg=color, bg=self.colors["surface"], font=('Segoe UI', 14, 'bold')).pack(expand=True)
+                    
+                    self.slot_indicators[sid] = slot_box
+                    
+                    col += 1
+                    if col >= max_cols:
+                        col = 0
+                        row += 1
+                
+                # Cập nhật tóm tắt ở Dashboard
+                vacant_count = list(slots.values()).count("VACANT")
+                self.lbl_slot_summary.config(text=f"CHỖ TRỐNG: {vacant_count}/{len(slots)}")
         
         # 1. Vẽ Header (Dòng 0)
         headers = [("Tên Chủ Thẻ", 0), ("UID Thẻ", 1), ("Trạng Thái", 2), ("Thời Gian", 3), ("Phí", 4), ("Hành Động", 5)]
@@ -271,7 +334,11 @@ class ModernParkingGUI:
 
     # --- CALLBACKS ---
     def _on_backend_event(self, uid, event, detail):
-        self.root.after(0, lambda: self._log_to_ui(uid, event, detail))
+        # Kiểm tra nếu detail có chứa thông tin phí (để tách ra cột riêng)
+        fee_val = "-"
+        if "Phí:" in detail:
+            fee_val = detail.split("Phí: ")[1]
+        self.root.after(0, lambda: self._log_to_ui(uid, event, detail, fee_val))
 
     def _on_new_card(self, uid):
         self.root.after(0, lambda: self.ask_add_card(uid))
@@ -285,10 +352,10 @@ class ModernParkingGUI:
         else:
             self.lbl_status.config(text="○ WAITING FOR ESP32...", fg=self.colors["text_dim"])
 
-    def _log_to_ui(self, uid, event, detail):
+    def _log_to_ui(self, uid, event, detail, fee="-"):
         t = datetime.now().strftime("%H:%M:%S")
         try:
-            self.htree.insert("", 0, values=(t, uid, event, detail))
+            self.htree.insert("", 0, values=(t, uid, event, detail, fee))
             self.log_txt.insert('1.0', f"[{t}] {event} - {uid}: {detail}\n")
             if int(self.log_txt.index('end-1c').split('.')[0]) > 200:
                 self.log_txt.delete('200.0', 'end')
@@ -301,6 +368,78 @@ class ModernParkingGUI:
                 self.backend.store.request_save()
             self._log_to_ui(uid, "REG", "Đã cấp quyền")
             self.refresh_table()
+            
+    def load_history_from_db(self):
+        with self.backend.store.lock:
+            history = self.backend.store.data.get("history", [])
+            # Load in reverse to show newest first
+            for item in reversed(history):
+                self.htree.insert("", "end", values=(item["time"], item["uid"], item["event"], item["detail"]))
+
+    def export_revenue(self):
+        # Hàm con thực thi việc ghi file trong luồng phụ
+        def worker(file_path, revenue_data):
+            try:
+                with open(file_path, mode='w', newline='', encoding='utf-8-sig') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["THỜI GIAN", "MÃ THẺ", "SỰ KIỆN", "CHI TIẾT", "DOANH THU (VNĐ)"])
+                    total_revenue = 0
+                    for h in revenue_data:
+                        fee = h.get("fee", 0)
+                        writer.writerow([h["time"], h["uid"], h["event"], h["detail"], fee])
+                        total_revenue += fee
+                    writer.writerow([])
+                    writer.writerow(["TỔNG CỘNG", "", "", "", total_revenue])
+                
+                # Quay lại luồng chính để hiện thông báo
+                self.root.after(0, lambda: messagebox.showinfo("Thành công", f"Đã xuất báo cáo thành công tại:\n{file_path}"))
+                
+                # Hỏi xóa lịch sử (phải chạy ở luồng chính)
+                self.root.after(100, self._ask_clear_history)
+            except Exception as e:
+                self.root.after(0, lambda ex=e: messagebox.showerror("Lỗi", f"Không thể ghi file: {ex}"))
+
+        # LOGIC CHÍNH CỦA HÀM EXPORT
+        revenue_data = []
+        history_empty = False
+        
+        with self.backend.store.lock:
+            history = self.backend.store.data.get("history", [])
+            if not history:
+                history_empty = True
+            else:
+                revenue_data = [h.copy() for h in history if h.get("event") == "RA"]
+
+        # Đưa các thông báo ra ngoài block "with lock" để tránh treo App
+        if history_empty:
+            messagebox.showwarning("Thông báo", "Không có dữ liệu để xuất.")
+            return
+
+        if not revenue_data:
+            messagebox.showwarning("Thông báo", "Chưa có dữ liệu doanh thu (các lượt RA).")
+            return
+
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV Files", "*.csv")],
+            initialfile=f"Bao_cao_doanh_thu_{datetime.now().strftime('%Y%m%d')}.csv"
+        )
+        
+        if file_path:
+            # Chạy việc ghi file trong luồng riêng để UI không bị "Not Responding"
+            threading.Thread(target=worker, args=(file_path, revenue_data), daemon=True).start()
+
+    def _ask_clear_history(self):
+        if messagebox.askyesno("Xác nhận", "Bạn có muốn XÓA lịch sử cũ trong hệ thống sau khi đã xuất báo cáo không?"):
+            with self.backend.store.lock:
+                self.backend.store.data["history"] = []
+                self.backend.store.request_save()
+            
+            # Xóa trên giao diện
+            for item in self.htree.get_children():
+                self.htree.delete(item)
+            self.log_txt.delete('1.0', 'end')
+            messagebox.showinfo("Thông báo", "Đã xóa sạch lịch sử cũ.")
 
     def save_settings(self):
         try:
