@@ -6,9 +6,9 @@
 #include <WiFi.h>
 #include <Wire.h>
 
-const char *ssid = "CUONGHAYHO";         // Thay tên WiFi của bạn
-const char *password = "11111111"; // Thay mật khẩu WiFi
-const char *server_ip = "192.168.137.1";       // Thay IP của máy tính chạy Python
+const char *ssid = "";         // Thay tên WiFi của bạn
+const char *password = ""; // Thay mật khẩu WiFi
+const char *server_ip = "";       // Thay IP của máy tính chạy Python
 const uint16_t server_port = 5000;
 
 WiFiClient client;

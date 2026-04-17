@@ -1,9 +1,9 @@
 #include "WiFiS3.h"
 
 // --- CẤU HÌNH HỆ THỐNG ---
-const char* ssid = "CUONGHAYHO";          // Tên WiFi
-const char* password = "11111111";        // Mật khẩu WiFi
-const char* serverIP = "192.168.137.1";    // IP máy tính (Server)
+const char* ssid = "";          // Tên WiFi
+const char* password = "";        // Mật khẩu WiFi
+const char* serverIP = "";    // IP máy tính (Server)
 const int serverPort = 5001;               // Cổng Server (Dành cho Uno R4)
 
 #define NUM_SLOTS 6
