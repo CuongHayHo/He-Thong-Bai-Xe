@@ -82,14 +82,6 @@ AUTH_TOKEN=your_secret_token_12345
 cd BAIDOXE_OPTIMIZED
 python main.py
 ```
-
-**⚠️ Lưu ý Bảo Mật:**
-- KHÔNG commit `config.h`, `.env`, `server.crt`, `server.key` lên Git
-- Thêm vào `.gitignore`
-- Khi deploy, copy `.env.example` rồi sửa giá trị thực tế
-
-
-
 ---
 
 ## 🔌 Sơ Đồ Đấu Dây (Wiring Diagram)
