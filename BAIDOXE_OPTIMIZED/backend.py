@@ -179,12 +179,18 @@ class ParkingBackend:
                     continue
 
             conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            # --- TCP KEEP-ALIVE (Bảo vệ kết nối & phát hiện Offline nhanh) ---
+            conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            try:
+                # Windows-specific: enable, idle_ms (5s), interval_ms (2s)
+                conn.ioctl(socket.SIO_KEEPALIVE_VALS, (1, 5000, 2000))
+            except: pass
             
             client_list = self.gate_clients if mode == "GATE" else self.slot_clients
             with self.store.lock:
                 client_list.append(conn)
             
-            self._trigger("on_client_change", len(self.gate_clients) + len(self.slot_clients)) 
+            self._trigger("on_client_change", len(self.gate_clients), len(self.slot_clients)) 
             logger.info(f"New {mode} connection from {addr}")
             threading.Thread(target=self._client_handler, args=(conn, addr, mode), daemon=True).start()
 
@@ -206,7 +212,7 @@ class ParkingBackend:
             with self.store.lock:
                 if conn in client_list:
                     client_list.remove(conn)
-            self._trigger("on_client_change", len(self.gate_clients) + len(self.slot_clients))
+            self._trigger("on_client_change", len(self.gate_clients), len(self.slot_clients))
             conn.close()
 
     def handle_msg(self, conn, line, mode):
@@ -326,7 +332,6 @@ class ParkingBackend:
                         self.gate_clients.remove(d)
                     except: pass
         
-        count = len(self.gate_clients) + len(self.slot_clients)
-        self._trigger("on_client_change", count)
+        self._trigger("on_client_change", len(self.gate_clients), len(self.slot_clients))
         self._trigger("on_event", "SYSTEM", f"MANUAL OPEN {gate}", f"Sent to {len(current_clients) - len(dead)} clients")
         logger.info(f"Manual open command handled for gate {gate}")

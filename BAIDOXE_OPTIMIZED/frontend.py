@@ -83,8 +83,14 @@ class ModernParkingGUI:
         header.pack(fill='x', side='top')
         header.pack_propagate(False)
         tk.Label(header, text="PARKING CONTROL CENTER", fg=self.colors["success"], bg=self.colors["surface"], font=('Segoe UI', 18, 'bold')).pack(side='left', padx=30)
-        self.lbl_status = tk.Label(header, text="○ WAITING FOR ESP32...", fg=self.colors["text_dim"], bg=self.colors["surface"], font=('Segoe UI', 10, 'bold'))
-        self.lbl_status.pack(side='right', padx=30)
+        self.status_frame = tk.Frame(header, bg=self.colors["surface"])
+        self.status_frame.pack(side='right', padx=30)
+        
+        self.lbl_status_gate = tk.Label(self.status_frame, text="○ GATE: OFFLINE", fg=self.colors["text_dim"], bg=self.colors["surface"], font=('Segoe UI', 9, 'bold'))
+        self.lbl_status_gate.pack(side='left', padx=10)
+        
+        self.lbl_status_slot = tk.Label(self.status_frame, text="○ SLOT: OFFLINE", fg=self.colors["text_dim"], bg=self.colors["surface"], font=('Segoe UI', 9, 'bold'))
+        self.lbl_status_slot.pack(side='left', padx=10)
 
         # Tabs
         self.notebook = ttk.Notebook(self.root)
@@ -343,14 +349,21 @@ class ModernParkingGUI:
     def _on_new_card(self, uid):
         self.root.after(0, lambda: self.ask_add_card(uid))
 
-    def _on_client_change(self, count):
-        self.root.after(0, lambda: self._update_status(count))
+    def _on_client_change(self, gate_count, slot_count):
+        self.root.after(0, lambda: self._update_status(gate_count, slot_count))
 
-    def _update_status(self, count):
-        if count > 0:
-            self.lbl_status.config(text=f"● ONLINE: {count} DEVICES", fg=self.colors["success"])
+    def _update_status(self, gate_count, slot_count):
+        # Update GATE status
+        if gate_count > 0:
+            self.lbl_status_gate.config(text=f"● GATE: ONLINE ({gate_count})", fg=self.colors["success"])
         else:
-            self.lbl_status.config(text="○ WAITING FOR ESP32...", fg=self.colors["text_dim"])
+            self.lbl_status_gate.config(text="○ GATE: OFFLINE", fg=self.colors["text_dim"])
+            
+        # Update SLOT status
+        if slot_count > 0:
+            self.lbl_status_slot.config(text=f"● SLOT: ONLINE ({slot_count})", fg=self.colors["warning"]) # Dùng màu vàng cho Slot để dễ phân biệt
+        else:
+            self.lbl_status_slot.config(text="○ SLOT: OFFLINE", fg=self.colors["text_dim"])
 
     def _log_to_ui(self, uid, event, detail, fee="-"):
         t = datetime.now().strftime("%H:%M:%S")
