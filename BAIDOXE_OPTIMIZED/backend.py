@@ -1,4 +1,5 @@
 import socket
+import ssl
 import json
 import threading
 import time
@@ -22,15 +23,34 @@ logging.basicConfig(
 )
 logger = logging.getLogger("Backend")
 
-# --- CONFIGURATION ---
+# --- CONFIGURATION (Load from .env) ---
+def load_env(file_path='.env'):
+    env_vars = {}
+    if os.path.exists(file_path):
+        with open(file_path, 'r') as f:
+            for line in f:
+                if line.strip() and not line.startswith('#'):
+                    key, value = line.strip().split('=', 1)
+                    env_vars[key] = value
+    return env_vars
+
+env = load_env()
 DB_FILE = 'parking_data.json'
 HOST = '0.0.0.0'
-PORT_GATE = 5000
-PORT_SLOT = 5001
+PORT_GATE = int(env.get('PORT_GATE', 5000))
+PORT_SLOT = int(env.get('PORT_SLOT', 5001))
+DEFAULT_RATE = int(env.get('HOURLY_RATE', 10000))
+AUTH_TOKEN = env.get('AUTH_TOKEN', 'SET_ME_IN_ENV')
 
 class ParkingStore:
     def __init__(self):
         self.data = self.load_db()
+        # Cập nhật rate từ .env nếu chưa có trong DB
+        if "config" not in self.data:
+            self.data["config"] = {"hourly_rate": DEFAULT_RATE}
+        elif "hourly_rate" not in self.data["config"]:
+            self.data["config"]["hourly_rate"] = DEFAULT_RATE
+        
         self.lock = threading.Lock()
         self.save_queue = queue.Queue()
         threading.Thread(target=self._save_worker, daemon=True).start()
@@ -119,18 +139,45 @@ class ParkingBackend:
                 logger.error(f"Callback Error ({event_name}): {e}\n{traceback.format_exc()}")
 
     def start_server(self):
-        threading.Thread(target=self._server_loop, args=(PORT_GATE, "GATE"), daemon=True).start()
-        threading.Thread(target=self._server_loop, args=(PORT_SLOT, "SLOT"), daemon=True).start()
+        # GATE (ESP32) dùng SSL để bảo mật mã thẻ và lệnh mở cổng
+        threading.Thread(target=self._server_loop, args=(PORT_GATE, "GATE", True), daemon=True).start()
+        # SLOT (Uno R4) dùng TCP thường để giảm tải và không cần sửa code Uno
+        threading.Thread(target=self._server_loop, args=(PORT_SLOT, "SLOT", False), daemon=True).start()
 
-    def _server_loop(self, port, mode):
+    def _server_loop(self, port, mode, use_ssl=True):
+        # --- SSL SETUP ---
+        context = None
+        if use_ssl:
+            context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            try:
+                context.load_cert_chain(certfile="server.crt", keyfile="server.key")
+                logger.info(f"{mode} SSL Certificate loaded successfully.")
+            except Exception as e:
+                logger.error(f"Failed to load SSL certificates for {mode}: {e}. Running WITHOUT SSL!")
+                context = None
+
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((HOST, port))
         server.listen(10)
-        logger.info(f"{mode} Server listening on {HOST}:{port}")
+        
+        if context:
+            logger.info(f"{mode} SSL Server listening on {HOST}:{port}")
+        else:
+            logger.info(f"{mode} Standard Server listening on {HOST}:{port}")
         
         while True:
             conn, addr = server.accept()
+            
+            # Wrap connection with SSL if context was loaded
+            if context:
+                try:
+                    conn = context.wrap_socket(conn, server_side=True)
+                except Exception as e:
+                    logger.warning(f"SSL Handshake failed with {addr}: {e}")
+                    conn.close()
+                    continue
+
             conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             
             client_list = self.gate_clients if mode == "GATE" else self.slot_clients
@@ -151,7 +198,7 @@ class ParkingBackend:
                 while "\n" in buffer:
                     line, buffer = buffer.split("\n", 1)
                     if line.strip():
-                        self.handle_msg(conn, line.strip())
+                        self.handle_msg(conn, line.strip(), mode)
         except Exception as e:
             logger.warning(f"{mode} Client {addr} disconnected: {e}")
         finally:
@@ -162,9 +209,18 @@ class ParkingBackend:
             self._trigger("on_client_change", len(self.gate_clients) + len(self.slot_clients))
             conn.close()
 
-    def handle_msg(self, conn, line):
+    def handle_msg(self, conn, line, mode):
         try:
             req = json.loads(line)
+            
+            # --- AUTHENTICATION CHECK (Chỉ áp dụng cho GATE) ---
+            if mode == "GATE":
+                client_token = req.get("auth")
+                if client_token != AUTH_TOKEN:
+                    logger.warning(f"Unauthorized access attempt from {conn.getpeername()}. Invalid Token.")
+                    conn.close()
+                    return
+
             action = req.get("action")
             uid = req.get("uid")
             gate_raw = req.get("gate", "")
@@ -249,16 +305,28 @@ class ParkingBackend:
             logger.error(f"Handler Error: {e}")
 
     def manual_open(self, gate):
-        msg = json.dumps({"gate": gate, "action": "OPEN"}) + "\n"
+        msg = (json.dumps({"gate": gate, "action": "OPEN"}) + "\n").encode('utf-8')
         dead = []
         with self.store.lock:
-            for c in self.gate_clients: # Chỉ gửi cho ESP32
+            # Chỉ lặp qua bản sao để tránh lỗi khi remove trong lúc lặp
+            current_clients = list(self.gate_clients)
+            
+            for c in current_clients:
                 try:
-                    c.sendall(msg.encode('utf-8'))
-                except: dead.append(c)
+                    c.sendall(msg)
+                except (socket.error, ssl.SSLError) as e:
+                    logger.warning(f"Failed to send manual open to a client: {e}")
+                    dead.append(c)
+            
+            # Dọn dẹp các kết nối chết
             for d in dead:
-                if d in self.gate_clients: self.gate_clients.remove(d)
+                if d in self.gate_clients:
+                    try: 
+                        d.close()
+                        self.gate_clients.remove(d)
+                    except: pass
         
-        self._trigger("on_client_change", len(self.gate_clients))
-        self._trigger("on_event", "SYSTEM", f"MANUAL OPEN {gate}", "Gửi từ phần mềm")
-        logger.info(f"Manual open command sent for gate {gate}")
+        count = len(self.gate_clients) + len(self.slot_clients)
+        self._trigger("on_client_change", count)
+        self._trigger("on_event", "SYSTEM", f"MANUAL OPEN {gate}", f"Sent to {len(current_clients) - len(dead)} clients")
+        logger.info(f"Manual open command handled for gate {gate}")

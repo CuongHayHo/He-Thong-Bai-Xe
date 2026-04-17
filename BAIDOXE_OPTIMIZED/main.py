@@ -1,21 +1,35 @@
 import tkinter as tk
 from backend import ParkingBackend
 from frontend import ModernParkingGUI
-import threading
+import os
+import sys
 
 def main():
-    # 1. Khởi tạo Backend (Xử lý dữ liệu & TCP Server)
+    # Kiểm tra file chứng chỉ ngay tại thư mục hiện hành
+    if not os.path.exists("server.crt") or not os.path.exists("server.key"):
+        print("="*50)
+        print("QUAN TRỌNG: KHÔNG TÌM THẤY FILE CHỨNG CHỈ SSL!")
+        print("Vui lòng chạy file gen_cert.py trong thư mục này trước.")
+        print("="*50)
+    
+    # Khởi tạo Backend
     backend = ParkingBackend()
     
-    # 2. Khởi tạo Giao diện chính (Frontend)
+    # Khởi động các luồng Server (TCP/SSL)
+    backend.start_server()
+    
+    # Khởi tạo Giao diện (Frontend)
     root = tk.Tk()
     app = ModernParkingGUI(root, backend)
     
-    # 3. Chạy Server mạng trên một luồng riêng
-    backend.start_server()
+    print("Hệ thống SSL đã sẵn sàng. Đang mở giao diện...")
     
-    # 4. Chạy vòng lặp Giao diện
-    root.mainloop()
+    # Chạy vòng lặp chính của giao diện
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        print("Đang đóng hệ thống...")
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()

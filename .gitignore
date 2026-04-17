@@ -6,10 +6,15 @@ __pycache__/
 venv/
 ENV/
 
-# Parking Data & Logs
+# Parking Data, Logs & SSL
 BAIDOXE_OPTIMIZED/logs/
+BAIDOXE_SSL/logs/
 *.log
-# parking_data.json  <-- Bỏ comment nếu bạn không muốn đẩy dữ liệu bãi xe lên GitHub
+parking_data.json
+.env
+*.crt
+*.key
+
 
 # Arduino / IDE
 build/

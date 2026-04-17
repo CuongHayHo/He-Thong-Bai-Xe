@@ -6,12 +6,11 @@
 #include <WiFi.h>
 #include <Wire.h>
 
-const char *ssid = "";         // Thay tên WiFi của bạn
-const char *password = ""; // Thay mật khẩu WiFi
-const char *server_ip = "";       // Thay IP của máy tính chạy Python
-const uint16_t server_port = 5000;
+#include "config.h"
 
-WiFiClient client;
+#include <WiFiClientSecure.h>
+
+WiFiClientSecure client;
 
 // =====================================================================
 // PIN DEFINITIONS
@@ -96,6 +95,7 @@ void sendJson(const char *gate, const char *action, String uid,
     doc["action"] = action;
     doc["uid"] = uid;
     doc["msg"] = msg;
+    doc["auth"] = AUTH_TOKEN;
 
     if (xSemaphoreTake(socketMutex, portMAX_DELAY)) {
       serializeJson(doc, client);
@@ -116,9 +116,10 @@ void maintainConnection() {
   }
 
   if (WiFi.status() == WL_CONNECTED && !client.connected()) {
-    updateLCD("SOCKET CONNECT..", server_ip);
+    updateLCD("SOCKET (SSL)..", server_ip);
+    client.setInsecure(); // Chấp nhận chứng chỉ tự ký (test)
     client.connect(server_ip, server_port);
-    client.setTimeout(500); // Giảm xuống 500ms để phản hồi nhanh hơn
+    client.setTimeout(1000); // Tăng timeout cho handshake SSL
     vTaskDelay(pdMS_TO_TICKS(1000));
 
     if (client.connected()) {

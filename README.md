@@ -1,15 +1,45 @@
-# PREMIUM SMART PARKING SYSTEM 🚗💨
+# 🛡️ SECURE SMART PARKING SYSTEM v4.0 (SSL/TLS Edition) 🚗💨
 
-Hệ thống quản lý bãi đỗ xe thông minh sử dụng **ESP32** (Quản lý cổng) và **Arduino Uno R4 WiFi** (Quản lý vị trí đỗ), kết nối với PC App qua giao thức Socket TCP.
+Hệ thống quản lý bãi đỗ xe thông minh phiên bản **Bảo Mật Cao Cấp**, tích hợp mã hóa SSL/TLS và xác thực Token. Hệ thống sử dụng **ESP32** (Quản lý cổng) và **Arduino Uno R4 WiFi** (Quản lý vị trí đỗ), giúp đảm bảo an toàn tuyệt đối cho dữ liệu và điều khiển.
 
 ---
 
-## 🏗️ Kiến Trúc Hệ Thống
+## 🏗️ Kiến Trúc Hệ Thống & Bảo Mật
 
-Hệ thống hoạt động trên mô hình Client-Server với 2 luồng độc lập:
-- **Cổng 5000**: Dành cho ESP32 xử lý RFID và Cửa tự động.
-- **Cổng 5001**: Dành cho Uno R4 xử lý 6 cảm biến siêu âm theo dõi chỗ trống.
-- **PC App**: Xây dựng bằng Python (Tkinter + Socket + Threading).
+Hệ thống hoạt động theo mô hình **Hybrid Security (Bảo mật Lai)**:
+- **Cổng 5000 (GATE):** Dành cho ESP32. Sử dụng **SSL/TLS (WiFiClientSecure)** kết hợp **Auth Token** để mã hóa toàn bộ thông tin thẻ RFID và lệnh mở cổng.
+- **Cổng 5001 (SLOT):** Dành cho Uno R4. Sử dụng **TCP Standard** kết hợp **Auth Token** để theo dõi 6 vị trí đỗ xe.
+- **PC Dashboard:** Xây dựng bằng Python, hỗ trợ đa luồng và giao diện quản lý chuyên nghiệp.
+
+---
+
+## 🔒 Tính Năng Bảo Mật Nổi Bật
+
+1.  **Mã hóa SSL/TLS (MbedTLS):** Toàn bộ dữ liệu giữa ESP32 và máy tính được mã hóa bằng thuật toán RSA 2048-bit, ngăn chặn hoàn toàn việc nghe lén UIDs trong mạng nội bộ.
+2.  **Xác thực thiết bị (Auth Token):** Mọi gói tin gửi lên Server phải đính kèm mã định danh bí mật. Backend sẽ từ chối các kết nối giả mạo.
+3.  **Chứng chỉ tự ký (Self-signed Cert):** Hệ thống tự quản lý chứng chỉ bảo mật mà không cần phụ thuộc vào bên thứ ba.
+
+---
+
+## 🛠️ Hướng Dẫn Cài Đặt
+
+### 1. Chuẩn bị môi trường Python
+Yêu cầu Python 3.10+. Cài đặt thư viện bảo mật:
+```powershell
+pip install cryptography
+```
+
+### 2. Thiết lập Chứng chỉ SSL
+Chạy lệnh duy nhất để tạo chứng chỉ (có hạn 10 năm):
+```powershell
+python gen_cert.py
+```
+
+### 3. Cấu hình thông số
+- **Máy tính:** Sửa nội dung file `BAIDOXE_OPTIMIZED/.env` (copy từ `.env.example`) để điền mã Token bí mật và giá tiền.
+- **ESP32:** `baidoxe/config.h` để điền SSID, mật khẩu WiFi và địa chỉ IP của máy tính.
+
+
 
 ---
 
@@ -21,57 +51,42 @@ Mạch sử dụng chung bus SPI cho 2 đầu đọc RFID.
 | Linh kiện | Chân trên ESP32 | Ghi chú |
 | :--- | :--- | :--- |
 | **RFID RC522 (Chung)** | SCK(18), MOSI(23), MISO(19) | Bus SPI chung |
-| **RFID VÀO** | SDA(5), RST(25) | |
-| **RFID RA** | SDA(15), RST(26) | |
-| **Servo VÀO** | D32 | |
-| **Servo RA** | D33 | |
-| **Cảm biến Vật cản VÀO** | Trig(27), Echo(34) | HC-SR04 |
-| **Cảm biến Vật cản RA** | Trig(4), Echo(35) | HC-SR04 |
+| **RFID VÀO/RA** | SDA(5/15), RST(25/26) | |
+| **Servo VÀO/RA** | D32 / D33 | |
+| **Cảm biến Vật cản** | Trig(27/4), Echo(34/35) | HC-SR04 |
 | **LCD 16x2 (I2C)** | SDA(21), SCL(22) | |
 
 ### 2. Arduino Uno R4 WiFi (Bộ theo dõi Chỗ trống)
-Quản lý 6 vị trí đỗ xe bằng cảm biến siêu âm HC-SR04.
-
-| Vị trí | Chân Trig | Chân Echo |
-| :--- | :--- | :--- |
-| **Slot 1** | 2 | 8 |
-| **Slot 2** | 3 | 9 |
-| **Slot 3** | 4 | 10 |
-| **Slot 4** | 5 | 11 |
-| **Slot 5** | 6 | 12 |
-| **Slot 6** | 7 | 13 |
+Quản lý 6 vị trí đỗ xe (Slot 1-6) sử dụng các chân từ D2 đến D13.
 
 ---
 
-## 💻 Cấu Hình Phần Mềm
+## 🚀 Hướng Dẫn Chạy Hệ Thống (Step-by-Step)
 
-### 1. WiFi & Mạng
-- **SSID**: `` (Nhập tên WiFi của bạn)
-- **Password**: `` (Nhập mật khẩu WiFi)
-- **IP Server (PC)**: `` (Nhập IP của máy tính - Cần đặt IP tĩnh cho máy tính phát WiFi).
-
-### 2. PC Application
-Yêu cầu Python 3.10+. Chạy lệnh khởi động:
+### Bước 1: Chuẩn bị chứng chỉ SSL
+Truy cập thư mục `BAIDOXE_OPTIMIZED` và chạy:
 ```powershell
-python .\main.py
+cd BAIDOXE_OPTIMIZED
+python gen_cert.py
+```
+*Kết quả: Xuất hiện file `server.crt` và `server.key`.*
+
+### Bước 2: Thiết lập cấu hình (.env)
+1. Copy file `.env.example` thành `.env` (ngay trong thư mục `BAIDOXE_OPTIMIZED`).
+2. Mở file `.env` và điền mã Token bí mật của bạn vào dòng `AUTH_TOKEN`.
+
+### Bước 3: Cấu hình và Nạp code phần cứng
+1. Mở thư mục `baidoxe`: Sửa `config.h` (WiFi, IP máy tính, Token). Nạp cho ESP32.
+2. Mở thư mục `quanlysoluongunor4`: Nạp cho Uno R4.
+
+### Bước 4: Khởi động Ứng dụng Quản lý
+Chạy lệnh sau ngay tại thư mục `BAIDOXE_OPTIMIZED`:
+```powershell
+python main.py
 ```
 
 ---
 
 ## 🌟 Tính Năng Nổi Bật
-
-1. **Giao diện Real-time**: Dashboard hiện đại, cập nhật tức thời trạng thái xe và vị trí trống.
-2. **Quản lý 6 chỗ đỗ**: Sử dụng thuật toán **Median Filter** để lọc nhiễu cảm biến, đảm bảo số liệu không bị nhảy ảo.
-3. **Phân quyền thẻ**: Hỗ trợ thẻ Admin (miễn phí) và thẻ User (tính tiền theo giờ).
-4. **Báo cáo chuyên nghiệp**:
-   - Tự động lưu lịch sử vào JSON (`parking_data.json`).
-   - Xuất báo cáo doanh thu ra file Excel/CSV kèm tổng cộng tiền.
-   - Có tùy chọn xóa sạch lịch sử sau khi xuất báo cáo để chốt sổ.
-5. **Ổn định cao**: Đa luồng (Threading) giúp App không bị treo khi xử lý đồng thời nhiều thiết bị.
-
----
-
-## 📝 Lưu Ý Vận Hành
-- Luôn khởi động PC App trước khi bật nguồn các mạch ESP32/Uno.
-- Nếu App báo "Not Responding" khi chọn file lưu, hãy yên tâm là dữ liệu vẫn đang được xử lý ngầm, hộp thoại chọn file sẽ hiện lên ngay sau đó.
-- Cảm biến siêu âm nên đặt cách mặt đất khoảng 10-15cm để nhận diện gầm xe tốt nhất.
+- ESP32 sử dụng chế độ `setInsecure()` để có thể làm việc trực tiếp với chứng chỉ tự ký của Server mà không cần nạp Root CA.
+- Đảm bảo Firewall của Windows cho phép các ứng dụng Python lắng nghe trên cổng 5000 và 5001.

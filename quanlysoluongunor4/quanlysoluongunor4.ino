@@ -1,10 +1,12 @@
 #include "WiFiS3.h"
 
 // --- CẤU HÌNH HỆ THỐNG ---
-const char* ssid = "";          // Tên WiFi
-const char* password = "";        // Mật khẩu WiFi
-const char* serverIP = "";    // IP máy tính (Server)
+const char* ssid = "YOUR_WIFI_SSID";          // Tên WiFi
+const char* password = "YOUR_WIFI_PASSWORD";        // Mật khẩu WiFi
+const char* serverIP = "YOUR_SERVER_IP";    // IP máy tính (Server)
 const int serverPort = 5001;               // Cổng Server (Dành cho Uno R4)
+#define AUTH_TOKEN "YOUR_SECRET_TOKEN"
+
 
 #define NUM_SLOTS 6
 #define NUM_SAMPLES 3      // Số lần đo để lấy trung vị (lọc nhiễu)
@@ -59,7 +61,8 @@ long medianFilter(int trigPin, int echoPin) {
 void sendUpdate(int slotIdx, bool occupied) {
   String status = occupied ? "OCCUPIED" : "VACANT";
   // Slot ID hiển thị trên App sẽ là 1, 2, 3, 4, 5, 6
-  String json = "{\"action\": \"SLOT_UPDATE\", \"slot\": " + String(slotIdx + 1) + ", \"status\": \"" + status + "\"}";
+  String json = "{\"action\": \"SLOT_UPDATE\", \"slot\": " + String(slotIdx + 1) + ", \"status\": \"" + status + "\", \"auth\": \"" + String(AUTH_TOKEN) + "\"}";
+
   
   if (client.connected()) {
     client.println(json);
