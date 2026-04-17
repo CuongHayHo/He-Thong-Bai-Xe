@@ -53,7 +53,7 @@ Quản lý 6 vị trí đỗ xe bằng cảm biến siêu âm HC-SR04.
 ### 2. PC Application
 Yêu cầu Python 3.10+. Chạy lệnh khởi động:
 ```powershell
-python .\main_pro.py
+python .\main.py
 ```
 
 ---
