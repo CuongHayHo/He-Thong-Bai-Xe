@@ -46,9 +46,9 @@ Quản lý 6 vị trí đỗ xe bằng cảm biến siêu âm HC-SR04.
 ## 💻 Cấu Hình Phần Mềm
 
 ### 1. WiFi & Mạng
-- **SSID**: `CUONGHAYHO`
-- **Password**: `11111111`
-- **IP Server (PC)**: `192.168.137.1` (Cần đặt IP tĩnh cho máy tính phát WiFi).
+- **SSID**: `` (Nhập tên WiFi của bạn)
+- **Password**: `` (Nhập mật khẩu WiFi)
+- **IP Server (PC)**: `` (Nhập IP của máy tính - Cần đặt IP tĩnh cho máy tính phát WiFi).
 
 ### 2. PC Application
 Yêu cầu Python 3.10+. Chạy lệnh khởi động:
