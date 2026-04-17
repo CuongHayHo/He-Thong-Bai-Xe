@@ -36,8 +36,57 @@ python gen_cert.py
 ```
 
 ### 3. Cấu hình thông số
-- **Máy tính:** Sửa nội dung file `BAIDOXE_OPTIMIZED/.env` (copy từ `.env.example`) để điền mã Token bí mật và giá tiền.
-- **ESP32:** `baidoxe/config.h` để điền SSID, mật khẩu WiFi và địa chỉ IP của máy tính.
+
+#### A. ESP32 - Tạo file `config.h`:
+Tạo file **config.h** trong thư mục **BAIDOXE_OPTIMIZED/** (cùng thư mục với baidoxe.ino):
+
+```cpp
+// config.h
+#ifndef CONFIG_H
+#define CONFIG_H
+
+#define WIFI_SSID "YOUR_SSID"
+#define WIFI_PASSWORD "YOUR_PASSWORD"
+#define SERVER_IP "192.168.X.X"
+#define SERVER_PORT 5000
+#define AUTH_TOKEN "your_secret_token_12345"
+
+#endif
+```
+
+**Điền:**
+- `YOUR_SSID`: Tên WiFi của bạn
+- `YOUR_PASSWORD`: Mật khẩu WiFi
+- `192.168.X.X`: IP của máy tính (đặt IP tĩnh)
+- `AUTH_TOKEN`: Token bảo mật (tùy chọn, phải giống .env)
+
+#### B. PC Backend - Tạo file `.env`:
+Tạo file **.env** trong thư mục **BAIDOXE_OPTIMIZED/**:
+
+```env
+SSID=YOUR_SSID
+PASSWORD=YOUR_PASSWORD
+PORT_GATE=5000
+PORT_SLOT=5001
+HOURLY_RATE=10000
+AUTH_TOKEN=your_secret_token_12345
+```
+
+**Điền:**
+- `SSID` & `PASSWORD`: Giống ESP32
+- `HOURLY_RATE`: Phí giữ xe theo giờ (đơn vị: đồng)
+- `AUTH_TOKEN`: **Phải giống config.h** để xác thực ESP32
+
+#### C. Chạy ứng dụng:
+```powershell
+cd BAIDOXE_OPTIMIZED
+python main.py
+```
+
+**⚠️ Lưu ý Bảo Mật:**
+- KHÔNG commit `config.h`, `.env`, `server.crt`, `server.key` lên Git
+- Thêm vào `.gitignore`
+- Khi deploy, copy `.env.example` rồi sửa giá trị thực tế
 
 
 

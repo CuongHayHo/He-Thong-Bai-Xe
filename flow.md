@@ -3,168 +3,298 @@
 ### **1. Kiến Trúc Hệ Thống**
 - **Architecture Diagram**: Hiển thị mối quan hệ giữa ESP32, Arduino, PC App, và kết nối mạng
 
-#### Architecture Diagram - Sơ đồ Client-Server
+#### Architecture Diagram - Sơ đồ Client-Server (SSL/TLS)
 
 ```mermaid
-architecture-beta
-    service esp32(server)[ESP32 Port5000]
+graph TB
+    subgraph PC["🖥️ PC Server Application                  "]
+        pcapp["PC Dashboard Server"]
+        db["📄 parking_data.json"]
+        env[".env Config"]
+    end
     
-    group server(cloud)[PC Server Application]
-    service pcapp(server)[              PC Dashboard Server] in server
-    service db(database)[Parking Data Storage] in server
+    ESP32["🔧 ESP32 Gateway<br/>SSL Port 5000"]
+    Arduino["🎛️ Arduino Uno R4<br/>TCP Port 5001"]
     
-    service uno(server)[Arduino Uno Port5001]
+    ESP32 -->|JSON + AUTH_TOKEN| pcapp
+    Arduino -->|JSON SLOT_UPDATE| pcapp
+    pcapp -->|AUTH Response| ESP32
+    pcapp -->|Door Control| ESP32
+    pcapp --> db
+    pcapp --> env
     
-    esp32:R --> L:pcapp
-    uno:L --> R:pcapp
-    pcapp:B --> T:db
+    style ESP32 fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style Arduino fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    style PC fill:#e1f5ff,stroke:#01579b,stroke-width:3px
+    style pcapp fill:#c8e6c9,stroke:#1b5e20,stroke-width:2px
+    style db fill:#fce4ec,stroke:#b71c1c,stroke-width:2px
+    style env fill:#fff9c4,stroke:#f57f17,stroke-width:2px
 ```
 
 **Mô tả Client-Server:**
-- **PC Application** (Server): Lắng nghe trên port 5000 & 5001, quản lý dữ liệu, hiển thị dashboard
-  - **ESP32 (Client Port 5000)**: Kết nối tới Server, gửi dữ liệu RFID và điều khiển Cửa tự động
-  - **Arduino Uno R4 (Client Port 5001)**: Kết nối tới Server, gửi trạng thái 6 vị trí đỗ xe
-  - **Storage**: Lưu trữ dữ liệu vào file JSON (parking_data.json)
+- **PC Application** (Server): Lắng nghe trên 2 ports riêng, quản lý dữ liệu, hiển thị dashboard
+  - **ESP32 (SSL Client Port 5000)**: Kết nối SSL/TLS, xác thực bằng AUTH_TOKEN, gửi RFID data
+  - **Arduino Uno R4 (TCP Client Port 5001)**: Kết nối TCP, gửi trạng thái 6 vị trí đỗ xe
+  - **Config**: Load từ `.env` (SSID, Password, AUTH_TOKEN, Hourly Rate)
+  - **Storage**: Lưu trữ dữ liệu vào file JSON (parking_data.json) + Logging
 
 **Luồng giao tiếp:**
-- ESP32 → PC Server (Port 5000): RFID tags, obstacle sensors
-- Arduino R4 → PC Server (Port 5001): Parking slot occupancy (6 sensors)
-- PC Server → Both Clients: Control commands (door control, etc.)
+- **ESP32 ↔ PC** (Port 5000 SSL/TLS): JSON messages với AUTH_TOKEN xác thực
+  - CHECK: Gửi UID thẻ, chờ xác thực (SUCCESS/REJECT/WRONG_WAY)
+  - DONE: Thông báo xe đã vượt qua
+- **Arduino ↔ PC** (Port 5001 TCP): JSON messages định kỳ
+  - SLOT_UPDATE: Trạng thái 6 cảm biến siêu âm
+- **PC ↔ ESP32**: Lệnh điều khiển (OPEN, AUTH response)
 
-#### Sequence Diagram - Luồng Giao Tiếp Chi Tiết
+#### Sequence Diagram - ESP32 Xác Thực Kết Nối với PC (SSL/TLS Handshake)
+
+```mermaid
+sequenceDiagram
+    participant ESP32
+    participant WiFi as WiFi Network
+    participant PC as PC Server
+    participant SSL as SSL/TLS Layer
+
+    ESP32->>ESP32: load config.h<br/>- WIFI_SSID<br/>- WIFI_PASSWORD<br/>- SERVER_IP:5000<br/>- AUTH_TOKEN
+
+    ESP32->>WiFi: WiFi.begin(SSID, PASSWORD)
+    activate WiFi
+    WiFi-->>ESP32: WiFi Connected<br/>Local IP: 192.168.X.Y
+    deactivate WiFi
+
+    ESP32->>PC: TCP Connect to SERVER_IP:5000<br/>(Port 5000)
+    activate PC
+    
+    PC->>SSL: Chấp nhận kết nối
+    activate SSL
+    
+    SSL->>ESP32: TLS Handshake Start<br/>ServerHello + Certificate
+    ESP32->>SSL: ClientKeyExchange + Finished
+    SSL->>ESP32: ChangeCipherSpec + Finished<br/>SSL/TLS Established ✓
+    deactivate SSL
+    
+    ESP32->>ESP32: Kết nối SSL thành công!<br/>client.setInsecure() hoạt động
+    
+    ESP32->>PC: Gửi JSON đầu tiên:<br/>{<br/>  action: CHECK,<br/>  uid: first_scan,<br/>  auth: AUTH_TOKEN,<br/>  gate: GATE IN/OUT<br/>}
+    
+    activate PC
+    PC->>PC: Nhận JSON qua SSL
+    PC->>PC: Xác thực AUTH_TOKEN<br/>Token từ .env
+    
+    alt AUTH_TOKEN hợp lệ ✓
+        PC->>PC: Log: "ESP32 Auth Success"<br/>Kết nối được phép
+        PC-->>ESP32: {"status":"SUCCESS"}<br/>hoặc {"status":"REJECT"}
+        ESP32->>ESP32: LCD: "SYSTEM READY"
+    else AUTH_TOKEN không hợp lệ ✗
+        PC->>PC: Log: "Unauthorized<br/>Invalid Token"
+        PC->>ESP32: Close Connection
+        PC->>ESP32: Từ chối kết nối
+        deactivate PC
+        
+        ESP32->>ESP32: Kết nối bị đóng
+        ESP32->>ESP32: LCD: "AUTH FAILED"
+        ESP32->>WiFi: Retry kết nối sau 10s
+    end
+    
+    deactivate PC
+```
+
+**Mô tả Xác Thực Kết Nối:**
+1. **Load Config**: ESP32 đọc `config.h` (SSID, Password, SERVER_IP, AUTH_TOKEN)
+2. **WiFi Connect**: Kết nối WiFi với tên và mật khẩu
+3. **TCP Connect**: Kết nối tới PC Server trên Port 5000
+4. **SSL/TLS Handshake**: 
+   - Server gửi chứng chỉ (self-signed từ `gen_cert.py`)
+   - ESP32 chấp nhận chứng chỉ (setInsecure() vì tự ký)
+   - Thiết lập kênh mã hóa
+5. **Gửi CHECK Message**: ESP32 gửi message đầu tiên với **AUTH_TOKEN** trong JSON
+6. **Server Verification**:
+   - ✅ Token hợp lệ → Kết nối được phép, LCD "SYSTEM READY"
+   - ❌ Token sai → Đóng kết nối, LCD "AUTH FAILED", retry sau 10s
+7. **Persistent Connection**: Giữ kết nối mở để gửi/nhận messages sau
+
+#### Sequence Diagram - Luồng Giao Tiếp Chi Tiết (Xe vào Bãi)
 
 ```mermaid
 sequenceDiagram
     participant Xe as Xe/Thẻ RFID
     participant ESP32
     participant Server as PC Dashboard Server
-    participant Arduino as Arduino (Slots)
+    participant DB as Database/JSON
 
     Xe->>ESP32: Quét thẻ RFID
     activate ESP32
-    ESP32->>Server: Gửi dữ liệu thẻ (Card ID)
+    ESP32->>ESP32: Đọc UID thẻ
+    ESP32->>Server: Gửi CHECK (UID + AUTH_TOKEN)<br/>via SSL/TLS
     deactivate ESP32
     
     activate Server
-    Server->>Server: Kiểm tra loại thẻ<br/>(Admin/User)
-    Server->>Server: Ghi nhận thời gian vào
-    alt Thẻ Admin
-        Server->>Server: Vào miễn phí
-    else Thẻ User
-        Server->>Server: Bắt đầu tính tiền
+    Server->>Server: Xác thực AUTH_TOKEN<br/>(từ .env)
+    
+    alt Token không hợp lệ
+        Server->>ESP32: Close Connection
+        Server->>Server: Log: Unauthorized access
+    else Token hợp lệ
+        Server->>Server: Kiểm tra UID trong DB
+        alt UID không tồn tại
+            Server->>ESP32: {"status":"REJECT"}
+        else UID tồn tại
+            Server->>Server: Kiểm tra loại thẻ<br/>(Admin/User) & trạng thái<br/>(isInside)
+            alt Thẻ Admin
+                Server->>ESP32: {"status":"SUCCESS","fee":0}
+                Server->>Server: Vào miễn phí
+            else Thẻ User + chưa vào
+                Server->>Server: Ghi nhận entry_time
+                Server->>ESP32: {"status":"SUCCESS","fee":0}
+            else Thẻ User + đã vào
+                Server->>Server: Tính phí: hours*rate
+                Server->>DB: Lưu history + phí
+                Server->>ESP32: {"status":"SUCCESS","fee":amount}
+            else Lỗi logic (đã vào lại vào)
+                Server->>ESP32: {"status":"WRONG_WAY"}
+            end
+        end
     end
-    Server->>ESP32: Mở cửa
     deactivate Server
     
     activate ESP32
-    ESP32->>ESP32: Điều khiển Servo Motor
-    ESP32->>Server: Báo cửa đã mở
+    ESP32->>ESP32: Xử lý phản hồi từ Server
+    alt status = SUCCESS
+        ESP32->>ESP32: Điều khiển Servo Motor
+        ESP32->>Server: Gửi DONE + AUTH_TOKEN<br/>(Xe đã vượt qua)<br/>via SSL/TLS
+        ESP32->>ESP32: LCD: "SUCCESS"
+    else status = WRONG_WAY
+        ESP32->>ESP32: LCD: "ALREADY IN/OUT"
+    else status = REJECT
+        ESP32->>ESP32: LCD: "CARD REJECTED"
+    end
     deactivate ESP32
+    
+    activate Server
+    Server->>DB: Cập nhật card.isInside = true
+    Server->>DB: Lưu vào history
+    Server->>Server: Callback: on_event (VÀO)
+    deactivate Server
     
     Xe->>Server: Xe đỗ vào bãi
     
-    activate Arduino
-    Arduino->>Arduino: Đọc 6 cảm biến siêu âm
-    Arduino->>Server: Gửi trạng thái 6 vị trí
-    deactivate Arduino
-    
     activate Server
-    Server->>Server: Cập nhật trạng thái slot
-    Server->>Server: Lưu vào parking_data.json
+    Server->>Server: Arduino gửi SLOT_UPDATE<br/>định kỳ
+    Server->>DB: Cập nhật slots status
+    Server->>Server: Callback: on_refresh
     deactivate Server
 ```
 
 **Mô tả Sequence Diagram (Xe vào Bãi):**
 1. **Quét RFID**: Xe đưa thẻ vào máy quét RFID trên ESP32
-2. **Kiểm tra loại thẻ**: PC Server kiểm tra xem thẻ là Admin (miễn phí) hay User (tính tiền)
-3. **Điều khiển cửa**: ESP32 nhận lệnh mở cửa, điều khiển Servo Motor
-4. **Phát hiện chỗ trống**: Arduino đọc 6 cảm biến siêu âm, báo trạng thái 6 vị trí đỗ
-5. **Lưu dữ liệu**: PC Server cập nhật trạng thái slot và lưu vào parking_data.json
+2. **Gửi CHECK**: ESP32 gửi UID + **AUTH_TOKEN** tới PC Server qua **SSL/TLS**
+3. **Xác thực Token**: Server kiểm tra AUTH_TOKEN (từ `.env`), từ chối nếu không đúng
+4. **Kiểm tra loại thẻ**: Server kiểm tra UID, loại thẻ (Admin/User), trạng thái (isInside)
+5. **Tính toán**: Nếu là User vào lần đầu → ghi nhận thời gian, nếu ra → tính tiền
+6. **Phản hồi**: Server gửi SUCCESS/REJECT/WRONG_WAY
+7. **Điều khiển cửa**: ESP32 mở Servo, gửi DONE khi xe vượt qua
+8. **Lưu dữ liệu**: Server cập nhật DB, phát callback để Frontend refresh
 
-#### Sequence Diagram (Xe ra Bãi)
+#### Sequence Diagram - Luồng Giao Tiếp Chi Tiết (Xe ra Bãi)
 
 ```mermaid
 sequenceDiagram
     participant Xe as Xe/Thẻ RFID
     participant ESP32
     participant Server as PC Dashboard Server
-    participant Arduino as Arduino (Slots)
+    participant DB as Database/JSON
 
     Xe->>ESP32: Quét thẻ RFID (Cổng ra)
     activate ESP32
-    ESP32->>Server: Gửi dữ liệu thẻ (Card ID)
+    ESP32->>Server: Gửi CHECK (UID + AUTH_TOKEN)<br/>via SSL/TLS - Cổng OUT
     deactivate ESP32
     
     activate Server
-    Server->>Server: Kiểm tra loại thẻ<br/>(Admin/User)
-    Server->>Server: Tính thời gian đỗ
+    Server->>Server: Xác thực AUTH_TOKEN
+    Server->>Server: Kiểm tra UID & trạng thái
     alt Thẻ Admin
+        Server->>ESP32: {"status":"SUCCESS","fee":0}
         Server->>Server: Ra miễn phí
-    else Thẻ User
-        Server->>Server: Tính tiền theo giờ<br/>Cập nhật ví
+    else Thẻ User + đã vào
+        Server->>Server: Tính phí: <br/>duration = now - entry_time<br/>hours = ceil(duration/3600)<br/>fee = hours * hourly_rate
+        Server->>DB: Lưu history + phí
+        Server->>ESP32: {"status":"SUCCESS","fee":amount}
+    else Lỗi logic (chưa vào lại ra)
+        Server->>ESP32: {"status":"WRONG_WAY"}
     end
-    Server->>Server: Ghi nhận lịch sử ra
-    Server->>ESP32: Mở cửa ra
     deactivate Server
     
     activate ESP32
-    ESP32->>ESP32: Điều khiển Servo Motor (Cửa ra)
-    ESP32->>Server: Báo cửa ra đã mở
+    alt status = SUCCESS
+        ESP32->>ESP32: Điều khiển Servo Motor (Cửa ra)
+        ESP32->>Server: Gửi DONE + AUTH_TOKEN<br/>(Xe đã vượt qua)<br/>via SSL/TLS
+        ESP32->>ESP32: LCD: "SUCCESS! EXIT<br/>FEE: amount VND"
+    else status = WRONG_WAY
+        ESP32->>ESP32: LCD: "ALREADY IN/OUT"
+    end
     deactivate ESP32
+    
+    activate Server
+    Server->>DB: Cập nhật card.isInside = false
+    Server->>DB: Ghi nhận exit_time
+    Server->>DB: Lưu history event
+    Server->>Server: Callback: on_event (RA + phí)
+    deactivate Server
     
     Xe->>Server: Xe rời khỏi bãi
     
-    activate Arduino
-    Arduino->>Arduino: Đọc 6 cảm biến siêu âm
-    Arduino->>Server: Gửi trạng thái slot trống
-    deactivate Arduino
-    
     activate Server
-    Server->>Server: Cập nhật slot thành trống
-    Server->>Server: Lưu vào parking_data.json
+    Server->>Server: Arduino gửi SLOT_UPDATE<br/>Phát hiện slot trống
+    Server->>DB: Cập nhật slots[slot_id] = VACANT
+    Server->>Server: Callback: on_refresh
     deactivate Server
 ```
 
 **Mô tả Sequence Diagram (Xe ra Bãi):**
 1. **Quét RFID ra**: Xe quét thẻ tại cổng ra
-2. **Tính toán phí**: PC Server tính thời gian đỗ và tiền phí (nếu là User)
-   - Admin ra miễn phí
-   - User: Tính tiền/giờ, cập nhật ví
-3. **Ghi nhận lịch sử**: PC Server lưu ghi nhận xe ra
-4. **Mở cửa ra**: ESP32 mở Servo Motor cửa ra
-5. **Phát hiện slot trống**: Arduino phát hiện xe rời khỏi, báo slot trống
-6. **Cập nhật dữ liệu**: PC Server cập nhật trạng thái slot và lưu JSON
+2. **Gửi CHECK**: ESP32 gửi CHECK tới Server qua SSL/TLS (PORT_OUT)
+3. **Tính toán phí**: Server tính thời gian đỗ (duration) và phí
+   - Admin: Phí = 0đ
+   - User: `hours = ceil((exit_time - entry_time)/3600)`, `fee = hours × hourly_rate` (từ .env)
+4. **Lưu history**: Server lưu transaction vào history + database
+5. **Mở cửa ra**: ESP32 mở Servo Motor cửa ra, hiển thị phí trên LCD
+6. **Phát hiện slot trống**: Arduino phát hiện xe rời khỏi, báo slot trống
+7. **Callback**: Server phát event để Frontend refresh UI
 
 ### **2. Luồng Hoạt Động**
 - **Sơ đồ quy trình (Flowchart)**: Quy trình xe vào/ra, tính tiền
 - **Sơ đồ trạng thái (State Diagram)**: Trạng thái các slot (trống/đã đỗ)
 
-#### Flowchart - baidoxe.ino (ESP32 Gate Controller)
+#### Flowchart - baidoxe.ino (ESP32 Gate Controller - SSL/TLS với AUTH_TOKEN)
 
 ```mermaid
 flowchart TD
-    Start([ESP32 Khởi Động]) --> Setup["<b>setup()</b><br/>Khởi tạo LCD, SPI, RFID,<br/>Servo, Queue, Semaphore,<br/>3 Tasks"]
+    Start([ESP32 Khởi Động]) --> LoadConfig["<b>Load config.h</b><br/>- WIFI_SSID, WIFI_PASSWORD<br/>- SERVER_IP, SERVER_PORT<br/>- AUTH_TOKEN"]
+    
+    LoadConfig --> Setup["<b>setup()</b><br/>Khởi tạo:<br/>- LCD I2C (SDA:21, SCL:22)<br/>- SPI chung: SCK(18), MOSI(23), MISO(19)<br/>- 2 RFID readers (SPI)<br/>- 2 Servo motors<br/>- 4 Ultrasonic sensors<br/>- 3 Tasks + Semaphores + Queues"]
     
     Setup --> Loop["<b>loop()</b><br/>Vòng lặp chính"]
     
     Loop --> MaintainConn{"WiFi<br/>kết nối?"}
-    MaintainConn -->|Không| ConnectWiFi["Kết nối WiFi:<br/>{WIFI_SSID}"]
-    ConnectWiFi --> CheckSocket{"TCP Socket<br/>kết nối?"}
+    MaintainConn -->|Không| ConnectWiFi["Kết nối WiFi:<br/>ssid & password<br/>từ config.h"]
+    ConnectWiFi --> CheckSocket{"SSL Socket<br/>kết nối?"}
     MaintainConn -->|Có| CheckSocket
     
-    CheckSocket -->|Không| ConnectSocket["Kết nối TCP Server<br/>{SERVER_IP}:5000"]
-    ConnectSocket --> Ready["LCD: SYSTEM READY"]
+    CheckSocket -->|Không| ConnectSocket["Kết nối SSL/TLS<br/>Server: config.h<br/>IP:PORT"]
+    ConnectSocket --> SetInsecure["setInsecure()<br/>Chấp nhận chứng chỉ<br/>tự ký (test)"]
+    SetInsecure --> Ready["LCD: SYSTEM READY<br/>WIFI + SOCKET"]
     CheckSocket -->|Có| Ready
     
     Ready --> TaskListener["<b>TaskSocketListener</b><br/>Priority 3 - Core 0"]
     Ready --> TaskGateIN["<b>TaskGate-IN</b><br/>Priority 1 - Core 1"]
     Ready --> TaskGateOUT["<b>TaskGate-OUT</b><br/>Priority 1 - Core 1"]
     
-    TaskListener --> ListenLoop["Lắng nghe Socket<br/>từ PC Server"]
-    ListenLoop --> ParseJSON{"Dữ liệu<br/>hợp lệ?"}
-    ParseJSON -->|Action=AUTH| ReceiveAuth["Nhận kết quả AUTH:<br/>SUCCESS/REJECT/<br/>WRONG_WAY"]
-    ParseJSON -->|Action=OPEN| ManualOpen["Lệnh mở cửa<br/>thủ công"]
-    ReceiveAuth --> PushQueue["Push vào Queue<br/>IN hoặc OUT"]
+    TaskListener --> ListenLoop["Lắng nghe SSL Socket<br/>từ PC Server"]
+    ListenLoop --> ParseJSON{"Dữ liệu<br/>hợp lệ JSON?"}
+    ParseJSON -->|Lỗi parse| ListenLoop
+    ParseJSON -->|Action=AUTH| ReceiveAuth["Nhận phản hồi:<br/>- status: SUCCESS/<br/>  REJECT/WRONG_WAY<br/>- fee (nếu có)"]
+    ParseJSON -->|Action=OPEN| ManualOpen["Lệnh mở cửa<br/>thủ công từ App"]
+    ReceiveAuth --> PushQueue["Push GateMsg vào<br/>Queue IN hoặc OUT"]
     ManualOpen --> PushQueue
     PushQueue --> ListenLoop
     
@@ -174,11 +304,11 @@ flowchart TD
     GateINLoop --> CheckQueueIN{"Có lệnh<br/>Queue?"}
     GateOUTLoop --> CheckQueueOUT{"Có lệnh<br/>Queue?"}
     
-    CheckQueueIN -->|Manual| OpenIN["Mở Servo IN"]
-    CheckQueueIN -->|Không| ScanRFDIN["Chờ quét RFID"]
+    CheckQueueIN -->|Manual| OpenIN["Mở Servo IN<br/>SERVO_OPEN_ANGLE"]
+    CheckQueueIN -->|Không| ScanRFDIN["Chờ quét RFID<br/>RFID IN"]
     
-    CheckQueueOUT -->|Manual| OpenOUT["Mở Servo OUT"]
-    CheckQueueOUT -->|Không| ScanRFDOUT["Chờ quét RFID"]
+    CheckQueueOUT -->|Manual| OpenOUT["Mở Servo OUT<br/>SERVO_OPEN_ANGLE"]
+    CheckQueueOUT -->|Không| ScanRFDOUT["Chờ quét RFID<br/>RFID OUT"]
     
     ScanRFDIN --> CardIN{"Phát hiện<br/>thẻ?"}
     ScanRFDOUT --> CardOUT{"Phát hiện<br/>thẻ?"}
@@ -186,118 +316,187 @@ flowchart TD
     CardIN -->|Không| GateINLoop
     CardOUT -->|Không| GateOUTLoop
     
-    CardIN -->|Có| SendCheckIN["Gửi CHECK<br/>tới PC Server"]
-    CardOUT -->|Có| SendCheckOUT["Gửi CHECK<br/>tới PC Server"]
+    CardIN -->|Có| ExtractUID_IN["Đọc UID thẻ<br/>Convert sang HEX"]
+    CardOUT -->|Có| ExtractUID_OUT["Đọc UID thẻ<br/>Convert sang HEX"]
     
-    SendCheckIN --> WaitAuthIN["Chờ phản hồi<br/>5s Timeout"]
-    SendCheckOUT --> WaitAuthOUT["Chờ phản hồi<br/>5s Timeout"]
+    ExtractUID_IN --> SendCheckIN["Gửi JSON qua SSL:<br/>{<br/>  action: CHECK,<br/>  gate: GATE IN,<br/>  uid: UID,<br/>  auth: AUTH_TOKEN<br/>}<br/>sendJson()"]
+    ExtractUID_OUT --> SendCheckOUT["Gửi JSON qua SSL:<br/>{<br/>  action: CHECK,<br/>  gate: GATE OUT,<br/>  uid: UID,<br/>  auth: AUTH_TOKEN<br/>}"]
     
-    WaitAuthIN --> CheckAuthIN{"Status<br/>là gì?"}
-    WaitAuthOUT --> CheckAuthOUT{"Status<br/>là gì?"}
+    SendCheckIN --> WaitAuthIN["Chờ phản hồi từ Queue<br/>Timeout: 5s<br/>xQueueReceive()"]
+    SendCheckOUT --> WaitAuthOUT["Chờ phản hồi từ Queue<br/>Timeout: 5s"]
+    
+    WaitAuthIN --> CheckAuthIN{"Phản hồi<br/>là gì?"}
+    WaitAuthOUT --> CheckAuthOUT{"Phản hồi<br/>là gì?"}
     
     CheckAuthIN -->|SUCCESS| OpenIN
     CheckAuthIN -->|WRONG_WAY| RejectIN["LCD:<br/>ALREADY IN/OUT"]
-    CheckAuthIN -->|FAIL| RejectIN
+    CheckAuthIN -->|REJECT| RejectIN2["LCD:<br/>CARD REJECTED"]
     CheckAuthIN -->|TIMEOUT| TimeoutIN["LCD:<br/>PC TIMEOUT"]
     
     CheckAuthOUT -->|SUCCESS| OpenOUT
     CheckAuthOUT -->|WRONG_WAY| RejectOUT["LCD:<br/>ALREADY IN/OUT"]
-    CheckAuthOUT -->|FAIL| RejectOUT
+    CheckAuthOUT -->|REJECT| RejectOUT2["LCD:<br/>CARD REJECTED"]
     CheckAuthOUT -->|TIMEOUT| TimeoutOUT["LCD:<br/>PC TIMEOUT"]
     
     RejectIN --> GateINLoop
+    RejectIN2 --> GateINLoop
     TimeoutIN --> GateINLoop
     RejectOUT --> GateOUTLoop
+    RejectOUT2 --> GateOUTLoop
     TimeoutOUT --> GateOUTLoop
     
-    OpenIN --> WaitVehicleIN["Mở cửa, chờ xe<br/>Ultrasonic Sensor"]
-    OpenOUT --> WaitVehicleOUT["Mở cửa, chờ xe<br/>Ultrasonic Sensor"]
+    OpenIN --> WaitVehicleIN["Mở cửa, chờ xe<br/>Ultrasonic Sensor IN<br/>getDistance()"]
+    OpenOUT --> WaitVehicleOUT["Mở cửa, chờ xe<br/>Ultrasonic Sensor OUT"]
     
-    WaitVehicleIN --> PassIN{"Xe<br/>vượt qua?"}
-    WaitVehicleOUT --> PassOUT{"Xe<br/>vượt qua?"}
+    WaitVehicleIN --> PassIN{"Xe vượt<br/>qua?<br/>Timeout 15s"}
+    WaitVehicleOUT --> PassOUT{"Xe vượt<br/>qua?"}
     
-    PassIN -->|Có| SendDoneIN["Gửi DONE<br/>tới PC"]
-    PassIN -->|Timeout| TimeoutServoIN["Sang vàng"]
+    PassIN -->|Có| SendDoneIN["Gửi JSON qua SSL:<br/>{<br/>  action: DONE,<br/>  uid: UID,<br/>  auth: AUTH_TOKEN<br/>}"]
+    PassIN -->|Timeout| TimeoutServoIN["LCD: TIMEOUT! CLOSED"]
     
-    PassOUT -->|Có| SendDoneOUT["Gửi DONE<br/>tới PC"]
-    PassOUT -->|Timeout| TimeoutServoOUT["Sang vàng"]
+    PassOUT -->|Có| SendDoneOUT["Gửi JSON qua SSL:<br/>{<br/>  action: DONE,<br/>  uid: UID,<br/>  auth: AUTH_TOKEN<br/>}"]
+    PassOUT -->|Timeout| TimeoutServoOUT["LCD: TIMEOUT! CLOSED"]
     
-    SendDoneIN --> CloseIN["Đóng Servo IN"]
+    SendDoneIN --> CloseIN["Đóng Servo IN<br/>SERVO_CLOSED_ANGLE"]
     TimeoutServoIN --> CloseIN
     
-    SendDoneOUT --> CloseOUT["Đóng Servo OUT"]
+    SendDoneOUT --> CloseOUT["Đóng Servo OUT<br/>SERVO_CLOSED_ANGLE"]
     TimeoutServoOUT --> CloseOUT
     
-    CloseIN --> ReadyIN["LCD: READY..."]
-    CloseOUT --> ReadyOUT["LCD: READY..."]
+    CloseIN --> ReadyIN["LCD: PARKING SYSTEM<br/>READY..."]
+    CloseOUT --> ReadyOUT["LCD: PARKING SYSTEM<br/>READY..."]
     
     ReadyIN --> GateINLoop
     ReadyOUT --> GateOUTLoop
     
+    style Start fill:#e1f5ff
+    style LoadConfig fill:#ffccbc
     style Setup fill:#e1f5ff
     style TaskListener fill:#fff3e0
     style TaskGateIN fill:#f3e5f5
     style TaskGateOUT fill:#f3e5f5
     style OpenIN fill:#c8e6c9
     style OpenOUT fill:#c8e6c9
+    style SendCheckIN fill:#bbdefb
+    style SendCheckOUT fill:#bbdefb
+    style SendDoneIN fill:#bbdefb
+    style SendDoneOUT fill:#bbdefb
 ```
 
-**Mô tả:**
-- **setup()**: Khởi tạo hardware (LCD I2C, SPI bus cho 2 RFID readers, 2 Servo motors, 4 Ultrasonic sensors)
-- **loop()**: Duy trì kết nối WiFi và TCP socket
-- **3 Tasks (FreeRTOS)**:
-  - `TaskSocketListener` (Priority 3): Lắng nghe dữ liệu từ PC Server, parse JSON, push kết quả vào Queue
-  - `TaskGate-IN` (Priority 1): Xử lý cửa vào - scan RFID, kiểm tra, mở cửa
-  - `TaskGate-OUT` (Priority 1): Xử lý cửa ra - scan RFID, kiểm tra, mở cửa
+**Mô tả Flowchart (Cập nhật):**
+- **Load config.h**: SSID, Password, Server IP, AUTH_TOKEN
+- **SSL/TLS Connection**: Kết nối với PC Server qua SSL, chứng chỉ tự ký
+- **sendJson()**: Gửi JSON qua SSL với **auth: AUTH_TOKEN** trong mọi message
+- **TaskSocketListener**: Lắng nghe phản hồi từ Server (AUTH response)
+- **TaskGate-IN/OUT**: 
+  1. Scan RFID → Đọc UID
+  2. Gửi CHECK qua SSL (kèm AUTH_TOKEN)
+  3. Chờ phản hồi 5s (SUCCESS/REJECT/WRONG_WAY)
+  4. Nếu SUCCESS → Mở Servo, chờ xe vượt qua
+  5. Gửi DONE qua SSL (kèm AUTH_TOKEN)
+  6. Đóng Servo, quay về trạng thái Ready
 
-**Quy trình chính (TaskGate)**:
-1. Chờ lệnh từ Queue (manual open hoặc từ Socket)
-2. Quét RFID (nếu không có lệnh manual)
-3. Gửi CHECK request tới PC Server
-4. Chờ phản hồi xác thực (5s timeout)
-5. Nếu SUCCESS → Mở Servo, chờ xe vượt qua
-6. Gửi DONE notification tới PC, đóng Servo
-7. Quay lại bước 1
-
-#### Flowchart - main.py (Entry Point)
+#### Flowchart - main.py & backend.py (Entry Point & Server)
 
 ```mermaid
 flowchart TD
-    Start([main.py Khởi Động]) --> InitBackend["Khởi tạo Backend<br/>- Load database JSON<br/>- Chuẩn bị 2 TCP servers<br/>Port 5000 GATE, 5001 SLOT"]
+    Start([main.py Khởi Động]) --> LoadEnv["<b>Load .env</b><br/>- SSID, PASSWORD<br/>- PORT_GATE (5000)<br/>- PORT_SLOT (5001)<br/>- HOURLY_RATE<br/>- AUTH_TOKEN"]
     
-    InitBackend --> InitFront["Khởi tạo Frontend<br/>Tkinter GUI<br/>- Dashboard Tab<br/>- Slots Tab<br/>- History Tab<br/>- Settings Tab"]
+    LoadEnv --> CheckSSL{"SSL Certificates<br/>(server.crt,<br/>server.key)<br/>tồn tại?"}
     
-    InitFront --> ConnectCallback["Kết nối Callbacks<br/>Backend -> Frontend<br/>- on_event<br/>- on_refresh<br/>- on_new_card<br/>- on_client_change"]
+    CheckSSL -->|Không| GenSSL["Chạy gen_cert.py<br/>Tạo chứng chỉ tự ký<br/>10 năm có hiệu lực"]
+    GenSSL --> Backend["Khởi tạo Backend<br/>- Load database JSON<br/>- Chuẩn bị 2 TCP servers<br/>Port 5000: GATE (SSL)<br/>Port 5001: SLOT (TCP)"]
+    CheckSSL -->|Có| Backend
     
-    ConnectCallback --> StartServer["backend.start_server()<br/>Khởi động 2 TCP servers<br/>trên 2 threads riêng"]
+    Backend --> InitFront["Khởi tạo Frontend<br/>Tkinter GUI<br/>- Dashboard Tab<br/>- Slots Tab<br/>- History Tab<br/>- Settings Tab"]
     
-    StartServer --> MainLoop["root.mainloop()<br/>Chạy vòng lặp GUI"]
+    InitFront --> ConnectCallback["Kết nối Callbacks<br/>Backend → Frontend<br/>- on_event<br/>- on_refresh<br/>- on_new_card<br/>- on_client_change"]
     
-    MainLoop --> WaitEvent["Chờ sự kiện:<br/>- Người dùng click button<br/>- TCP message từ ESP32/Arduino<br/>- Callback từ Backend"]
+    ConnectCallback --> StartServers["backend.start_server()<br/>2 threads riêng biệt"]
     
-    WaitEvent --> ProcessEvent{"Loại sự<br/>kiện?"}
+    StartServers --> Server1["<b>Port 5000 (GATE)</b><br/>SSL/TLS Server<br/>- Load SSL context<br/>- Lắng nghe kết nối<br/>- Wrap socket với SSL"]
     
-    ProcessEvent -->|TCP Message| HandleMsg["Backend xử lý:<br/>CHECK / DONE / SLOT_UPDATE"]
-    ProcessEvent -->|GUI Event| GUIEvent["Frontend xử lý:<br/>Thêm card, Export report,<br/>Manual gate control"]
-    ProcessEvent -->|Callback| UpdateUI["Frontend cập nhật UI:<br/>Refresh table, Update status"]
+    StartServers --> Server2["<b>Port 5001 (SLOT)</b><br/>TCP Server<br/>- Không dùng SSL<br/>- Lắng nghe kết nối"]
     
-    HandleMsg --> Trigger["Trigger callback<br/>on_event / on_refresh"]
-    Trigger --> UpdateUI
-    GUIEvent --> UpdateUI
-    UpdateUI --> SaveDB["Backend save data<br/>vào parking_data.json"]
-    SaveDB --> WaitEvent
+    Server1 --> ListenGate["Chờ ESP32 kết nối"]
+    Server2 --> ListenSlot["Chờ Arduino kết nối"]
     
-    style Start fill:#e1f5ff
-    style InitBackend fill:#fff3e0
+    ListenGate --> AcceptGate["Chấp nhận kết nối<br/>Wrap with SSL"]
+    ListenSlot --> AcceptSlot["Chấp nhận kết nối"]
+    
+    AcceptGate --> HandleGate["_client_handler(GATE)<br/>- Đọc dữ liệu JSON<br/>- Xác thực AUTH_TOKEN<br/>- Gọi handle_msg()"]
+    
+    AcceptSlot --> HandleSlot["_client_handler(SLOT)<br/>- Đọc dữ liệu JSON<br/>- Gọi handle_msg()"]
+    
+    HandleGate --> ProcessCheck{"Action?"}
+    HandleSlot --> ProcessSlot{"Action?"}
+    
+    ProcessCheck -->|CHECK| AuthCheck["<b>handle_msg (CHECK)</b><br/>1. Xác thực AUTH_TOKEN<br/>   → Từ chối nếu sai<br/>2. Kiểm tra UID tồn tại<br/>3. Kiểm tra loại thẻ<br/>4. Kiểm tra trạng thái"]
+    
+    AuthCheck --> CalcFee["Tính toán:<br/>- Admin: fee = 0<br/>- User vào: ghi nhận<br/>  entry_time<br/>- User ra: tính phí<br/>  hours = ceil(duration/3600)<br/>  fee = hours × HOURLY_RATE"]
+    
+    CalcFee --> ResponseCheck["Gửi phản hồi:<br/>{<br/>  status: SUCCESS/<br/>    REJECT/WRONG_WAY,<br/>  fee: amount<br/>}"]
+    
+    ProcessCheck -->|DONE| RecordDone["<b>handle_msg (DONE)</b><br/>- Cập nhật card.isInside<br/>- Ghi nhận entry/exit_time<br/>- Lưu vào history<br/>- Trigger callback"]
+    
+    ProcessSlot -->|SLOT_UPDATE| UpdateSlot["<b>handle_msg (SLOT_UPDATE)</b><br/>- Cập nhật slots[id] = status<br/>- Lưu DB<br/>- Trigger on_refresh"]
+    
+    ResponseCheck --> TriggerCallback["Trigger Callback:<br/>- on_event<br/>- on_refresh"]
+    RecordDone --> TriggerCallback
+    UpdateSlot --> TriggerCallback
+    
+    TriggerCallback --> FrontendUpdate["Frontend nhận<br/>callback → Refresh UI"]
+    
+    TriggerCallback --> SaveDB["ParkingStore.request_save()<br/>→ Debounce 1s<br/>→ Lưu vào JSON"]
+    
+    SaveDB --> LogEvent["Log event<br/>vào logs/parking_DATE.log"]
+    
+    FrontendUpdate --> GuiLoop["Tkinter GUI Event Loop"]
+    LogEvent --> GuiLoop
+    
+    GuiLoop --> UserAction{"User Action?"}
+    
+    UserAction -->|Add Card| AddCard["Thêm thẻ mới<br/>- Ghi vào database<br/>- Trigger on_new_card"]
+    UserAction -->|Export Report| ExportReport["Xuất báo cáo<br/>- Tổng tiền<br/>- Chi tiết transaction<br/>- Export CSV/Excel"]
+    UserAction -->|Manual Gate| ManualGate["Lệnh mở cửa<br/>- Gửi OPEN command<br/>- Tới cửa được chọn"]
+    UserAction -->|Settings| Settings["Cập nhật settings<br/>- HOURLY_RATE<br/>- Cập nhật .env"]
+    
+    AddCard --> GuiLoop
+    ExportReport --> GuiLoop
+    ManualGate --> GuiLoop
+    Settings --> GuiLoop
+    
+    style LoadEnv fill:#ffccbc
+    style CheckSSL fill:#ffe0b2
+    style GenSSL fill:#ffccbc
+    style Backend fill:#e1f5ff
     style InitFront fill:#f3e5f5
-    style MainLoop fill:#c8e6c9
+    style StartServers fill:#fff3e0
+    style Server1 fill:#c8e6c9
+    style Server2 fill:#c8e6c9
+    style AuthCheck fill:#bbdefb
+    style CalcFee fill:#bbdefb
+    style ResponseCheck fill:#bbdefb
+    style SaveDB fill:#ffccbc
+    style GuiLoop fill:#ce93d8
 ```
 
-**Mô tả:**
-- **Khởi tạo Backend**: Load dữ liệu, tạo 2 TCP servers (Port 5000 cho ESP32, 5001 cho Arduino)
-- **Khởi tạo Frontend**: Tạo Tkinter GUI với 4 tabs (Dashboard, Slots, History, Settings)
-- **Kết nối Callbacks**: Frontend lắng nghe sự kiện từ Backend
-- **Vòng lặp chính**: Chờ sự kiện từ TCP, GUI, hoặc Backend callback → Xử lý → Cập nhật UI → Lưu dữ liệu
+**Mô tả (Cập nhật):**
+- **Load .env**: Tải cấu hình từ file `.env`
+- **SSL Certificate**: Kiểm tra `server.crt` & `server.key`, nếu không có thì generate bằng `gen_cert.py`
+- **Backend Initialization**: 
+  - Load parking_data.json
+  - Tạo 2 servers: PORT 5000 (SSL/TLS) cho ESP32, PORT 5001 (TCP) cho Arduino
+- **Server Threads**:
+  - **Port 5000 (GATE)**: SSL/TLS Connection, yêu cầu AUTH_TOKEN
+  - **Port 5001 (SLOT)**: TCP Connection, không SSL
+- **Message Handler**:
+  - **CHECK**: Xác thực AUTH_TOKEN → Kiểm tra UID → Tính phí → Phản hồi
+  - **DONE**: Cập nhật isInside → Ghi history → Callback
+  - **SLOT_UPDATE**: Cập nhật slot status → Callback
+- **Database Saving**: Debounce 1s để tránh quá nhiều lần ghi file
+- **Logging**: Ghi event vào logs/parking_DATE.log
+- **Frontend Loop**: Lắng nghe callback từ Backend → Refresh UI
 
 #### Flowchart - backend.py (Server TCP & Logic Xử Lý)
 
