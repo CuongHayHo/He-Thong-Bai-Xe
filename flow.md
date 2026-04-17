@@ -673,29 +673,29 @@ flowchart TD
 
 ```mermaid
 graph TB
-    subgraph WiFi["📡 WiFi Network<br/>"]
+    subgraph WiFi["📡 WiFi Network"]
         PC["💻 PC WiFi Hotspot<br/>IP: {GATEWAY_IP}<br/>Gateway: {GATEWAY_IP}<br/>Subnet: 255.255.255.0"]
         
-        ESP32["🔧 ESP32 Client<br/>IP: DHCP<br/>Port: 5000<br/>(GATE Controller)"]
+        ESP32["🔧 ESP32 Client<br/>IP: DHCP<br/>SSL/TLS Port 5000<br/>(GATE Controller)"]
         
-        Arduino["🎛️ Arduino Uno R4<br/>IP: DHCP<br/>Port: 5001<br/>(SLOT Detector)"]
+        Arduino["🎛️ Arduino Uno R4<br/>IP: DHCP<br/>TCP Port 5001<br/>(SLOT Detector)"]
     end
     
     subgraph Services["🖥️ PC Services"]
-        Server["TCP Servers<br/>- Port 5000: GATE Server<br/>- Port 5001: SLOT Server"]
+        Server["Network Servers<br/>- Port 5000: SSL/TLS (GATE)<br/>- Port 5001: TCP (SLOT)"]
         Frontend["Tkinter GUI<br/>Dashboard + Settings"]
         Backend["Python Backend<br/>Logic & Database"]
-        DB[" parking_data.json<br/>Local Storage"]
+        DB["📄 parking_data.json<br/>Local Storage"]
     end
     
     subgraph External["🌐 External (Optional)"]
         PaymentGW["Payment Gateway<br/>(Internet Connection)"]
     end
     
-    PC -->|WiFi Connection| ESP32
-    PC -->|WiFi Connection| Arduino
-    ESP32 -->|TCP Port 5000| Server
-    Arduino -->|TCP Port 5001| Server
+    PC -->|WiFi| ESP32
+    PC -->|WiFi| Arduino
+    ESP32 -->|SSL/TLS<br/>AUTH_TOKEN| Server
+    Arduino -->|TCP| Server
     Server --> Backend
     Backend --> Frontend
     Backend --> DB
@@ -727,8 +727,8 @@ graph TB
   
 - **ESP32 (GATE Controller)**:
   - IP: Nhận từ DHCP
-  - Kết nối TCP tới PC:5000
-  - Gửi: RFID data, sensor data
+  - Kết nối SSL/TLS tới PC:5000 (xác thực AUTH_TOKEN)
+  - Gửi: RFID data + AUTH_TOKEN
   - Nhận: Door control commands
   
 - **Arduino Uno R4 (SLOT Detector)**:
@@ -737,13 +737,13 @@ graph TB
   - Gửi: 6 slot occupancy status
   - Nhận: Control commands (nếu có)
 
-**TCP Ports:**
-- **Port 5000 (GATE Server)**: Xử lý ESP32 signals
-  - CHECK: Thẻ kiểm tra
+**Network Ports (SSL/TLS + TCP):**
+- **Port 5000 (GATE Server - SSL/TLS)**: Xử lý ESP32 signals (mã hóa & xác thực)
+  - CHECK: Thẻ kiểm tra (yêu cầu AUTH_TOKEN)
   - DONE: Cửa đã đóng
   - Status: Trạng thái
   
-- **Port 5001 (SLOT Server)**: Xử lý Arduino signals
+- **Port 5001 (SLOT Server - TCP)**: Xử lý Arduino signals (không mã hóa)
   - SLOT_UPDATE: Cập nhật 6 vị trí
   - Dữ liệu: VACANT / OCCUPIED
 
@@ -758,6 +758,7 @@ graph TB
 **Lợi ích hệ thống:**
 ✅ Locally hosted → No internet required  
 ✅ DHCP automatic IP → Plug & play  
-✅ Dual TCP servers → Separate GATE & SLOT handling  
+✅ SSL/TLS Port 5000 → Xác thực AUTH_TOKEN, mã hóa RFID data
+✅ Separate ports → GATE (SSL) & SLOT (TCP) riêng biệt  
 ✅ JSON local storage → Fast access & backup
 
