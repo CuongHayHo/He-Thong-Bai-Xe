@@ -14,12 +14,12 @@
             "name": "User_C ED",
             "type": "regular",
             "isInside": false,
-            "entry_time": "2026-04-17 01:56:12",
-            "exit_time": "2026-04-17 01:56:16"
+            "entry_time": "2026-04-17 12:00:35",
+            "exit_time": "2026-04-17 12:03:15"
         },
         "05 A3 6C 05": {
             "name": "User_C 05",
-            "type": "admin",
+            "type": "regular",
             "isInside": true,
             "entry_time": "2026-04-09 16:46:55",
             "exit_time": "2026-04-09 16:45:10"
@@ -34,9 +34,8 @@
         "66 8D 36 06": {
             "name": "User_6 06",
             "type": "regular",
-            "isInside": false,
-            "entry_time": "2026-04-17 01:56:05",
-            "exit_time": "2026-04-17 01:56:20"
+            "isInside": true,
+            "entry_time": "2026-04-17 12:16:37"
         }
     },
     "history": [
@@ -67,11 +66,123 @@
             "event": "RA",
             "detail": "Phí: 10,000đ",
             "fee": 10000
+        },
+        {
+            "time": "2026-04-17 12:00:19",
+            "uid": "32 4B FC ED",
+            "event": "VÀO",
+            "detail": "Xe đã qua cổng",
+            "fee": 0
+        },
+        {
+            "time": "2026-04-17 12:00:31",
+            "uid": "32 4B FC ED",
+            "event": "RA",
+            "detail": "Phí: 10,000đ",
+            "fee": 10000
+        },
+        {
+            "time": "2026-04-17 12:00:35",
+            "uid": "32 4B FC ED",
+            "event": "VÀO",
+            "detail": "Xe đã qua cổng",
+            "fee": 0
+        },
+        {
+            "time": "2026-04-17 12:03:15",
+            "uid": "32 4B FC ED",
+            "event": "RA",
+            "detail": "Phí: 10,000đ",
+            "fee": 10000
+        },
+        {
+            "time": "2026-04-17 12:03:22",
+            "uid": "66 8D 36 06",
+            "event": "VÀO",
+            "detail": "Xe đã qua cổng",
+            "fee": 0
+        },
+        {
+            "time": "2026-04-17 12:03:26",
+            "uid": "66 8D 36 06",
+            "event": "RA",
+            "detail": "Phí: 10,000đ",
+            "fee": 10000
+        },
+        {
+            "time": "2026-04-17 12:04:29",
+            "uid": "66 8D 36 06",
+            "event": "VÀO",
+            "detail": "Xe đã qua cổng",
+            "fee": 0
+        },
+        {
+            "time": "2026-04-17 12:04:44",
+            "uid": "66 8D 36 06",
+            "event": "RA",
+            "detail": "Phí: 10,000đ",
+            "fee": 10000
+        },
+        {
+            "time": "2026-04-17 12:04:53",
+            "uid": "66 8D 36 06",
+            "event": "VÀO",
+            "detail": "Xe đã qua cổng",
+            "fee": 0
+        },
+        {
+            "time": "2026-04-17 12:05:07",
+            "uid": "66 8D 36 06",
+            "event": "RA",
+            "detail": "Phí: 10,000đ",
+            "fee": 10000
+        },
+        {
+            "time": "2026-04-17 12:07:41",
+            "uid": "66 8D 36 06",
+            "event": "VÀO",
+            "detail": "Xe đã qua cổng",
+            "fee": 0
+        },
+        {
+            "time": "2026-04-17 12:08:01",
+            "uid": "66 8D 36 06",
+            "event": "RA",
+            "detail": "Phí: 10,000đ",
+            "fee": 10000
+        },
+        {
+            "time": "2026-04-17 12:08:07",
+            "uid": "66 8D 36 06",
+            "event": "VÀO",
+            "detail": "Xe đã qua cổng",
+            "fee": 0
+        },
+        {
+            "time": "2026-04-17 12:08:24",
+            "uid": "66 8D 36 06",
+            "event": "RA",
+            "detail": "Phí: 10,000đ",
+            "fee": 10000
+        },
+        {
+            "time": "2026-04-17 12:15:24",
+            "uid": "66 8D 36 06",
+            "event": "VÀO",
+            "detail": "Xe đã qua cổng",
+            "fee": 0
+        },
+        {
+            "time": "2026-04-17 12:16:37",
+            "uid": "66 8D 36 06",
+            "event": "VÀO",
+            "detail": "Xe đã qua cổng",
+            "fee": 0
         }
     ],
     "slots": {
-        "1": "VACANT",
-        "2": "VACANT",
+        "1": "OCCUPIED",
+        "2": "OCCUPIED",
         "3": "VACANT",
         "4": "VACANT",
         "5": "VACANT",
